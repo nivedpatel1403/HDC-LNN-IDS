@@ -26,6 +26,10 @@ wheels/
 venv/
 ENV/
 
+# Phase Reports & Work Notes
+PHASE*_REPORT.md
+PRE_PHASE12_CLEANUP_REPORT.md
+
 # Data & Output directories (gitignored as per spec)
 data/raw/*
 !data/raw/SOURCES.md
