@@ -1,6 +1,5 @@
 # HDC-LNN-IDS: Hybrid HDC-LNN Architecture for Real-Time Anomaly Detection
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
 
 ## Overview
@@ -75,11 +74,6 @@ Pre-configured YAML models are located in `configs/`:
 - `lstm_baseline.yaml`: HDC feature encoder + standard LSTM sequence model.
 - `cnn_baseline.yaml`: HDC feature encoder + 1D Convolutional Neural Network baseline.
 - `ltc_ablation.yaml`: HDC feature encoder + Liquid Time-Constant (LTC) neural network.
-
----
-
-## License
-This project is licensed under the [MIT License](LICENSE).
 
 ---
 
