@@ -1,0 +1,48 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hdlnn"
+version = "0.1.0"
+description = "Hybrid HDC-LNN Architecture for Real-Time Anomaly Detection"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "torch-hd",
+    "ncps",
+    "pydantic>=2.0",
+    "pydantic-settings>=2.0",
+    "torch",
+    "numpy",
+    "pandas",
+    "pyarrow",
+    "pyyaml",
+    "scikit-learn",
+    "psutil",
+    "matplotlib",
+    "streamlit",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["hdlnn*"]
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+addopts = "-ra -q"
+testpaths = [
+    "tests",
+]
+markers = [
+    "unit: Unit tier tests checking contracts, serialization, OOV fallbacks, and VSA ops",
+    "component: Component tier tests checking encoder determinism, model batch/streaming equivalence, and windowing",
+    "data_quality: Data-quality tier tests checking loader schema mappings and flow validation",
+    "integration: Integration tier tests checking end-to-end pipeline execution against hand-computed expected metrics",
+    "ablation: Ablation suite tier tests checking multi-config comparative metrics and ablation runner",
+]

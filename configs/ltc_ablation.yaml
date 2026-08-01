@@ -1,0 +1,14 @@
+run_id: "ltc_ablation_v1"
+seed: 42
+log_level: "INFO"
+hdc_encoder: "on"
+lnn_stage: "on"
+sequence_model_type: "ltc"
+epochs: 5
+lr: 0.001
+target_fpr: 0.05
+hidden_size: 64
+dimensionality: 10000
+num_levels: 100
+window_size: 10
+device: "cpu"

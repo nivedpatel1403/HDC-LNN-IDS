@@ -1,0 +1,21 @@
+{
+  "unsw_1": "test",
+  "unsw_2": "train",
+  "unsw_3": "train",
+  "unsw_4": "train",
+  "unsw_5": "train",
+  "unsw_6": "train",
+  "unsw_7": "train",
+  "unsw_8": "train",
+  "unsw_9": "test",
+  "unsw_10": "val",
+  "unsw_11": "val",
+  "unsw_12": "test",
+  "unsw_14": "train",
+  "unsw_15": "train",
+  "unsw_16": "train",
+  "unsw_17": "test",
+  "unsw_18": "test",
+  "unsw_19": "train",
+  "unsw_20": "val"
+}
