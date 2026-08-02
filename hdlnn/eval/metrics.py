@@ -3,14 +3,14 @@
 from typing import Any
 import numpy as np
 import psutil
-from sklearn.metrics import f1_score, precision_score, recall_score, roc_auc_score, roc_curve
+from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score, roc_auc_score, roc_curve
 import torch
 
 from hdlnn.contracts.decision import AnomalyDecision
 
 
 def compute_detection_metrics(decisions: list[AnomalyDecision]) -> dict[str, Any]:
-    """Compute detection performance metrics (F1, Precision, Recall, AUROC, FPR@95%TPR).
+    """Compute detection performance metrics (F1, Precision, Recall, Accuracy, AUROC, FPR@95%TPR).
 
     Args:
         decisions: List of AnomalyDecision contract objects.
@@ -23,6 +23,7 @@ def compute_detection_metrics(decisions: list[AnomalyDecision]) -> dict[str, Any
             "f1": 0.0,
             "precision": 0.0,
             "recall": 0.0,
+            "accuracy": 0.0,
             "auroc": 0.0,
             "fpr_at_95_tpr": 0.0,
             "total_decisions": 0,
@@ -36,6 +37,7 @@ def compute_detection_metrics(decisions: list[AnomalyDecision]) -> dict[str, Any
     f1 = float(f1_score(y_true, y_pred, zero_division=0))
     precision = float(precision_score(y_true, y_pred, zero_division=0))
     recall = float(recall_score(y_true, y_pred, zero_division=0))
+    accuracy = float(accuracy_score(y_true, y_pred))
 
     # AUROC calculation with single-class fallback
     if len(np.unique(y_true)) > 1:
@@ -63,6 +65,7 @@ def compute_detection_metrics(decisions: list[AnomalyDecision]) -> dict[str, Any
         "f1": f1,
         "precision": precision,
         "recall": recall,
+        "accuracy": accuracy,
         "auroc": auroc,
         "fpr_at_95_tpr": fpr_at_95_tpr,
         "total_decisions": len(decisions),
