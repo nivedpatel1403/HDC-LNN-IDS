@@ -137,10 +137,10 @@ def test_ablation_suite_6_configs_plus_cross_dataset_placeholder(tmp_path, monke
         assert "oov_rate" in row
         assert row["oov_rate"] >= 0.0
 
-    # Cross-dataset transfer stub verification
+    # Cross-dataset transfer verification
     transfer_res = run_cross_dataset_transfer(None, [])
     assert transfer_res["dataset"] == "CICIoT2023"
-    assert "not_run" in transfer_res["status"]
+    assert transfer_res["status"] in ("completed", "skipped: ciciot_slice_5k.csv raw file not found")
 
 
 @pytest.mark.ablation

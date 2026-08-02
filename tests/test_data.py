@@ -65,12 +65,9 @@ def test_splitter_deterministic_and_non_overwriting(tmp_path):
 
 
 @pytest.mark.data_quality
-def test_stub_loaders_raise_not_implemented():
+def test_all_loaders_implement_iloader():
     ciciot_loader = CICIoTLoader()
     nslkdd_loader = NSLKDDLoader()
 
-    with pytest.raises(NotImplementedError):
-        ciciot_loader.load("dummy_path.csv")
-
-    with pytest.raises(NotImplementedError):
-        nslkdd_loader.load("dummy_path.csv")
+    assert isinstance(ciciot_loader, ILoader)
+    assert isinstance(nslkdd_loader, ILoader)

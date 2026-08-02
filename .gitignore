@@ -30,6 +30,7 @@ ENV/
 PHASE*_REPORT.md
 PRE_PHASE12_CLEANUP_REPORT.md
 PUBLIC_REPO_READINESS_REPORT.md
+implementation_plan.md
 
 
 # Data & Output directories (gitignored as per spec)

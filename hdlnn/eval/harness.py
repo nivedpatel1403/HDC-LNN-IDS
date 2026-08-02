@@ -153,18 +153,98 @@ def run_experiment(
 
 
 def run_cross_dataset_transfer(
-    trained_pipeline: IPipeline, ciciot_flows: list[Any]
+    trained_pipeline: IPipeline | None = None, ciciot_flows: list[Any] | None = None
 ) -> dict[str, Any]:
-    """Placeholder stub for zero-shot cross-dataset evaluation on CICIoT2023.
+    """Execute zero-shot cross-dataset evaluation of UNSW-NB15 trained model on CICIoT2023 dataset.
 
-    Note: CICIoTLoader is a Phase 2 stub raising NotImplementedError. Cross-dataset numbers are not faked.
+    Per ADR-004, the model is trained strictly on UNSW-NB15 and evaluated zero-shot (no fine-tuning,
+    no re-fitting of manifold thresholds) against CICIoT2023.
+
+    Args:
+        trained_pipeline: IPipeline instance pre-trained on UNSW-NB15 (or None to auto-train).
+        ciciot_flows: List of CanonicalFlow objects for CICIoT2023 (or None to auto-load).
+
+    Returns:
+        Dictionary containing zero-shot transfer detection metrics.
     """
+    logger = get_logger("hdlnn.eval.harness.cross_dataset_transfer")
+
+    # 1. Acquire CICIoT2023 flows if not supplied
+    if not ciciot_flows:
+        from hdlnn.data.loaders.ciciot import CICIoTLoader
+        ciciot_loader = CICIoTLoader()
+        ciciot_path = Path("data") / "raw" / "ciciot_slice_5k.csv"
+        if not ciciot_path.exists():
+            return {
+                "status": "skipped: ciciot_slice_5k.csv raw file not found",
+                "dataset": "CICIoT2023",
+                "f1": None,
+                "auroc": None,
+                "accuracy": None,
+            }
+        ciciot_flows = ciciot_loader.load(str(ciciot_path))
+
+    for f in ciciot_flows:
+        if getattr(f, "split", None) is None:
+            f.split = "test"
+
+    # 2. Train pipeline on UNSW-NB15 if not supplied
+    if trained_pipeline is None:
+        from hdlnn.data.loaders.unsw import UNSWLoader
+        from hdlnn.data.splitter import Splitter
+        unsw_path = Path("data") / "raw" / "unsw_slice_5k.csv"
+        if not unsw_path.exists():
+            return {
+                "status": "skipped: unsw_slice_5k.csv raw file not found for training source",
+                "dataset": "CICIoT2023",
+                "f1": None,
+                "auroc": None,
+                "accuracy": None,
+            }
+        unsw_loader = UNSWLoader()
+        unsw_flows = unsw_loader.load(str(unsw_path))
+        splitter = Splitter()
+        train_f, val_f, test_f = splitter.split(unsw_flows, seed=42)
+
+        cfg = Settings(run_id="cross_dataset_unsw_fit", epochs=2, dimensionality=1024)
+        trained_pipeline = StandardPipeline(settings=cfg)
+        trained_pipeline.run(train_f, val_f, test_f)
+    # 3. Evaluate zero-shot on CICIoT2023 flows
+    from hdlnn.eval.metrics import compute_detection_metrics
+
+    logger.info("Executing zero-shot evaluation on %d CICIoT2023 flows...", len(ciciot_flows))
+    decisions = []
+
+    for flow in ciciot_flows:
+        hv = trained_pipeline.encoder.encode(flow)
+        curr_state = trained_pipeline.sequence_model.step(
+            hv, prev_state=None, entity_id=flow.src_ip
+        )
+        dec = trained_pipeline.divergence_scorer.score(
+            curr_state,
+            ground_truth_label=flow.label,
+            attack_category=flow.attack_category,
+        )
+        decisions.append(dec)
+
+    metrics = compute_detection_metrics(decisions)
+    logger.info(
+        "Zero-Shot Cross-Dataset Evaluation on CICIoT2023: F1=%.4f, AUROC=%.4f, Acc=%.4f",
+        metrics.get("f1", 0.0),
+        metrics.get("auroc", 0.0),
+        metrics.get("accuracy", 0.0),
+    )
+
     return {
-        "status": "not_run: CICIoTLoader not yet implemented (Phase 2 stub)",
+        "status": "completed",
         "dataset": "CICIoT2023",
-        "f1": None,
-        "auroc": None,
-        "accuracy": None,
+        "total_flows": len(ciciot_flows),
+        "f1": metrics.get("f1", 0.0),
+        "auroc": metrics.get("auroc", 0.0),
+        "accuracy": metrics.get("accuracy", 0.0),
+        "precision": metrics.get("precision", 0.0),
+        "recall": metrics.get("recall", 0.0),
+        "fpr_at_95_tpr": metrics.get("fpr_at_95_tpr", 0.0),
     }
 
 
