@@ -1,3 +1,26 @@
-run_id: "base_run_001"
 seed: 42
-log_level: "INFO"
+
+hdc:
+  dimension: 10000
+  continuous_features_range: [0.0, 1.0]
+
+model:
+  hidden_dim: 64
+  lr: 0.001
+  epochs: 2
+  batch_size: 256
+  sequence_length: 16
+  weight_decay: 0.0
+
+data:
+  dataset_name: "unsw_nb15"
+  cache_dir: "data/raw"
+  split_version: "v1"
+
+divergence:
+  mode: "mahalanobis"
+  threshold_k: 3.0
+  # Scores are distances: higher score means more anomalous.
+  calibration_method: "f1_max"
+  min_precision: 0.95
+  target_tpr: 0.95
