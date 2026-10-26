@@ -1,81 +1,234 @@
-# HDC-LNN-IDS: Hybrid HDC-LNN Architecture for Real-Time Anomaly Detection
+# HDC-LNN: Continuous-Time Neural Hyperdimensional Computing for Telemetry Anomaly Detection
 
-[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![PyTorch](https://img.shields.io/badge/PyTorch-2.0+-ee4c2c.svg)](https://pytorch.org/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-009688.svg)](https://fastapi.tiangolo.com/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-## Overview
-**HDC-LNN-IDS** is a hybrid framework combining **Hyperdimensional Computing (HDC)** and **Liquid Neural Networks (LNNs)** for real-time network intrusion and anomaly detection. 
-
-The system leverages HDC (Symbolic Hyperdimensional Vector Encoding) for ultra-fast, high-dimensional feature representations of network flow tuples (`src_ip`, `dst_ip`, `src_port`, `dst_port`, `proto`, `state`, `duration`, `bytes`), combined with continuous-time Liquid Neural Network architectures (Closed-form Continuous-depth Networks (**CfC**) and Liquid Time-Constant networks (**LTC**)) for real-time sequence modeling and out-of-distribution anomaly detection via manifold Mahalanobis divergence scoring.
-
----
-
-## Current Status
-- **Development Progress**: Phases 1 through 11 complete (of 12 planned phases).
-- **Validation**: Full pipeline contract integrity and end-to-end multi-entity streaming validation verified on the real **UNSW-NB15** dataset (49-feature raw partition specification with genuine IP/port flow sequences across 30 distinct entity trajectories).
-- **Test Suite Coverage**: 66 unit, integration, property, and baseline equivalence tests passing cleanly.
+An end-to-end framework and empirical benchmark comparing **Continuous-Time Closed-Form Liquid Neural Networks combined with Hyperdimensional Computing (HDC-LNN)** against modern state-space and sequence models (**Mamba-2**, **1D-CNN**, **LSTM-Autoencoder**, and **LSTM**) for line-rate cybersecurity anomaly detection.
 
 ---
 
-## Quick Start
+## 📑 Table of Contents
+1. [Architecture Overview](#-architecture-overview)
+2. [Environment Setup & Activation](#-environment-setup--activation)
+3. [Running the Baseline Benchmark Suite](#-running-the-baseline-benchmark-suite)
+4. [Running Individual Baseline Models via CLI](#-running-individual-baseline-models-via-cli)
+5. [Interactive Web Dashboard & Real-Time Telemetry Stream](#-interactive-web-dashboard--real-time-telemetry-stream)
+6. [Encoder Geometric Separability Study](#-encoder-geometric-separability-study)
+7. [Batch Multi-Dataset Runner](#-batch-multi-dataset-runner)
+8. [Running Automated Tests](#-running-automated-tests)
+9. [Artifacts, Reports & Metrics Structure](#-artifacts-reports--metrics-structure)
 
-### 1. Requirements
-- **Python**: 3.10 or higher
-- **PyTorch**: 2.0+
+---
 
-### 2. Installation
-Clone the repository and install the project in editable mode:
-```bash
-git clone https://github.com/nivedpatel1403/HDC-LNN-IDS.git
-cd HDC-LNN-IDS
-pip install -e .
+## 🧠 Architecture Overview
+
+```
+                               ┌───────────────────────────────────┐
+Raw Network Flow Stream ──────>│   HDC RecordEncoder (D=10,000)    │───┐
+(CSV / Live Telemetry)         │ Continuous Codebooks + Item Memory│   │ 10,000-D Bipolar Vector (x_t)
+                               └───────────────────────────────────┘   │ + Inter-Arrival Time (Δt)
+                                                                       ▼
+┌───────────────────────────────────┐    ┌───────────────────────────────────┐
+│   One-Class Reference Manifold    │<───│ Continuous-Time Closed-Form (CfC) │
+│ (Ledoit-Wolf Mahalanobis Distance)│    │       Liquid Neural Network       │
+└─────────────────┬─────────────────┘    │    (Adaptive Hidden State h_t)    │
+                  │                      └───────────────────────────────────┘
+                  │ Anomaly Divergence Score
+                  ▼
+┌───────────────────────────────────┐
+│      Decision & SIEM Alerting     │
+│ [Normal (0) / Threat Attack (1)]  │
+└───────────────────────────────────┘
 ```
 
-### 3. Running Tests
-Verify the complete test suite:
+- **HDC Encoder ($D=10,000$)**: Maps continuous numeric metrics into orthogonal level hypervectors and binds categorical fields via associative item memory.
+- **CfC Liquid Neural Network**: Computes continuous-time recurrent state transitions with non-linear time constants $\tau(\Delta t)$.
+- **One-Class Reference Manifold**: Calibrates Mahalanobis/Cosine decision boundaries exclusively against normal traffic states during validation to eliminate target label leakage.
+
+---
+
+## ⚡ Environment Setup & Activation
+
+### Step 1: Activate the Virtual Environment
+Ensure your terminal session is inside the project root and activate the environment:
+
+```powershell
+# Windows PowerShell
+.\.venv\Scripts\Activate.ps1
+```
+
+```bash
+# Linux / macOS / Git Bash
+source .venv/bin/activate
+```
+
+*(You will see `(.venv)` in your terminal prompt).*
+
+### Step 2: Dataset & Runs Directory Setup
+- `datasets/` and `runs/` folders exist in the repository structure but are intentionally excluded from git tracking (see `.gitignore`).
+- Download benchmark datasets (e.g. UNSW-NB15, NSL-KDD, CICIoT2023) and place the CSV files directly inside `datasets/`. See [`datasets/SOURCES.md`](datasets/SOURCES.md) for canonical download links and expected file names.
+- The `runs/` directory is automatically populated with `metrics.json`, `decisions.parquet`, and `roc_curve.png` whenever evaluation or training is run. It is normal and expected for `runs/` to be empty on a fresh clone. Key verified benchmark summary artifacts are committed to [`results/`](results/).
+
+---
+
+## 🚀 Running the Baseline Benchmark Suite
+
+The main benchmarking script is [`run_all_baselines.py`](run_all_baselines.py). It evaluates all 5 model architectures (**Mamba-2**, **1D-CNN**, **LSTM-Autoencoder**, **HDC-LNN**, and **LSTM**) under strict entity-disjoint leakage isolation.
+
+### 1. Fast Smoke Test (Recommended First, finishes in ~15s)
+Runs 5,000 flows with 1 epoch for rapid validation and pipeline sanity check:
+```bash
+python run_all_baselines.py --quick
+```
+
+### 2. Full-Scale Benchmark on Primary Dataset (UNSW-NB15)
+Evaluates 30,000 contiguous flows with full validation manifold calibration:
+```bash
+python run_all_baselines.py --dataset UNSW_NB15_testing-set.csv
+```
+
+### 3. Generalization Benchmark on NSL-KDD
+Evaluates the full model suite on the NSL-KDD intrusion detection dataset:
+```bash
+python run_all_baselines.py --dataset kdd_test.csv
+```
+
+### 4. Benchmark on ToN-IoT
+```bash
+python run_all_baselines.py --dataset ton-iot.csv
+```
+
+### 5. Benchmark Across ALL Datasets in `datasets/`
+```bash
+python run_all_baselines.py --all
+```
+
+> **CLI Options Summary:**
+> - `--dataset <filename>`: Run all baselines against a specific CSV file in `datasets/`.
+> - `--all`: Discover and evaluate all CSV dataset files in `datasets/`.
+> - `--quick`: Capped smoke test (5,000 flows, 1 epoch).
+> - `--limit <N>`: Explicitly set the number of telemetry flows evaluated.
+> - `--output-table <path>`: Markdown table output path (defaults to `final_comparison_table.md`).
+
+---
+
+## 🔬 Running Individual Baseline Models via CLI
+
+You can execute a single model baseline directly using [`hdlnn.pipeline`](hdlnn/pipeline.py):
+
+```bash
+# Evaluate HDC-LNN (Ours)
+python -m hdlnn.pipeline --mode eval --baseline hdc-lnn --source-file datasets/UNSW_NB15_testing-set.csv
+
+# Evaluate Mamba-2 (Pure PyTorch SSM)
+python -m hdlnn.pipeline --mode eval --baseline mamba2 --source-file datasets/UNSW_NB15_testing-set.csv
+
+# Evaluate 1D-CNN (Temporal Conv)
+python -m hdlnn.pipeline --mode eval --baseline cnn --source-file datasets/UNSW_NB15_testing-set.csv
+
+# Evaluate LSTM-Autoencoder
+python -m hdlnn.pipeline --mode eval --baseline autoencoder --source-file datasets/UNSW_NB15_testing-set.csv
+
+# Evaluate Recurrent LSTM
+python -m hdlnn.pipeline --mode eval --baseline lstm --source-file datasets/UNSW_NB15_testing-set.csv
+```
+
+**Available Baselines:** `hdc-lnn`, `mamba2`, `cnn`, `autoencoder`, `lstm`, `hdc-only`, `lnn-only`.
+
+---
+
+## 🖥️ Interactive Web Dashboard & Real-Time Telemetry Stream
+
+The project includes an interactive web interface powered by **FastAPI**, **Uvicorn**, and **WebSockets** with live telemetry simulation and anomaly charting.
+
+### Launch the Dashboard:
+```bash
+python -m hdlnn.pipeline --mode gui --port 8050
+```
+
+### Accessing the Dashboard:
+1. Open your browser and go to: **`http://localhost:8050`**
+2. **Features available in the GUI**:
+   - 📈 **Live Drift Monitoring**: Real-time continuous Mahalanobis divergence score charts with anomaly threshold lines.
+   - ⚡ **Telemetry Stream Controller**: Start, pause, and adjust flow ingestion rate (flows/sec).
+   - 🚨 **Synthetic Threat Injection**: Trigger real-time DNS Low-and-Slow exfiltration and Lateral Movement attacks on the fly.
+   - 🎛️ **Threshold Tuning**: Adjust sensitivity multipliers ($k$) and observe live precision/recall impact.
+   - 📋 **SOAR Alert Log**: Live feed of security incident response alerts and IP containment triggers.
+
+---
+
+## 📐 Encoder Geometric Separability Study
+
+To evaluate how well different hyperdimensional encoding schemes separate normal traffic from attack patterns in hyperspace *prior* to neural network training:
+
+```bash
+python evaluate_encoder_separability.py
+```
+
+### What It Measures:
+- **`RecordEncoder` (HDC)** vs. **`SAXEncoder` (Symbolic Aggregate)** vs. **`RFFEncoder` (Random Fourier Features)**.
+- **Centroid Cosine Distance**: Angular separation of class means in 10,000-D space.
+- **Normalized Euclidean Distance**: Scale-invariant Euclidean gap.
+- **Fisher-like Ratio**: Ratio of between-class variance to within-class variance.
+- **Separability Margin**: Net distinction ($\text{Intra-Normal Sim} - \text{Inter-Class Sim}$).
+- Saves empirical metrics to [`results/encoder_separability.json`](results/encoder_separability.json).
+
+---
+
+## 📦 Batch Multi-Dataset Runner
+
+To run HDC-LNN across all 31 dataset files in `datasets/` and generate a consolidated benchmark summary:
+
+```bash
+python run_all_datasets.py
+```
+> Outputs consolidated results to [`dataset_runs_summary.md`](dataset_runs_summary.md).
+
+---
+
+## 🧪 Running Automated Tests
+
+Run the complete pytest test suite (covers encoder parity, manifold fitting, temporal splitters, SIMD fallback, and threat injectors):
+
 ```bash
 pytest
 ```
+*(All 15 tests pass in ~3 seconds).*
 
 ---
 
-## Usage
+## 📊 Artifacts, Reports & Metrics Structure
 
-### Training & Evaluation CLI
-Run experiments using predefined configuration files under `configs/`:
+Every benchmark execution saves structured, verifiable artifacts:
 
-```bash
-# Run hybrid HDC-CfC model training & evaluation
-hdlnn train --config configs/hybrid.yaml
-
-# Run HDC-only baseline
-hdlnn train --config configs/hdc_only.yaml
-
-# Run LNN-only baseline
-hdlnn train --config configs/lnn_only.yaml
-
-# Run LSTM baseline comparison
-hdlnn train --config configs/lstm_baseline.yaml
-
-# Run CNN baseline comparison
-hdlnn train --config configs/cnn_baseline.yaml
-
-# Run LTC ablation study
-hdlnn train --config configs/ltc_ablation.yaml
 ```
-
----
-
-## Architecture & Configuration
-
-Pre-configured YAML models are located in `configs/`:
-- `hybrid.yaml`: Full hybrid HDC encoder + CfC liquid neural network stage.
-- `hdc_only.yaml`: HDC feature encoder with direct manifold divergence scoring.
-- `lnn_only.yaml`: Raw flow features passed directly into CfC liquid neural network.
-- `lstm_baseline.yaml`: HDC feature encoder + standard LSTM sequence model.
-- `cnn_baseline.yaml`: HDC feature encoder + 1D Convolutional Neural Network baseline.
-- `ltc_ablation.yaml`: HDC feature encoder + Liquid Time-Constant (LTC) neural network.
-
----
-
-## Research Context & Attribution
-*(Note: IAMPro / IEEE Computer Society research context attribution details can be specified here by the author)*
+HDC-LNN2/
+├── final_comparison_table.md       # Master 5-baseline comparison table (full-scale verified)
+├── ARCHITECTURE.md                 # Detailed system architecture documentation
+├── pyproject.toml                  # Project metadata & dependency manifest
+├── datasets/                       # Raw benchmark CSVs — gitignored; see SOURCES.md
+│   ├── README.md
+│   └── SOURCES.md                  # Canonical download links for all benchmark datasets
+├── results/                        # Committed verified summary artifacts
+│   ├── final_optimized_hdclnn_summary.json    # Final optimized HDC-LNN test metrics
+│   ├── full_scale_30k_results.json            # Full 5-baseline 30k-flow benchmark
+│   ├── encoder_separability.json              # Geometric separability study metrics
+│   ├── phase9_manifold_results_unsw_nb15_testing_set.json
+│   └── phase9_manifold_results_kdd_test.json
+├── docs/                           # Process reports & optimization history
+│   ├── final_optimization_and_comparison_report.txt
+│   ├── manifold_quality_improvement_report.txt
+│   ├── task_report.txt
+│   └── repo_hygiene_and_cleanup_report.txt
+├── experiments/                    # Diagnostic and calibration experiment scripts
+│   ├── run_phase3_phase4.py        # Phase 3/4: ROC separability & threshold calibration
+│   ├── run_phase9_manifold.py      # Phase 9: Manifold quality (Ledoit-Wolf, OAS, MCD)
+│   └── run_final_optimized_evaluation.py
+└── runs/                           # Live evaluation outputs — gitignored
+    └── <run_id>/
+        ├── metrics.json            # Confusion matrix, F1, AUROC, latency, RSS, throughput
+        ├── decisions.parquet       # Per-flow label, prediction, drift score, timestamp
+        └── config.yaml             # Hyperparameter snapshot for reproducibility
+```
