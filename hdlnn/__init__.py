@@ -1,3 +1,7 @@
+"""HDC-LNN: Continuous-Time Neural Hyperdimensional Computing for Telemetry Anomaly Detection."""
+
+__version__ = "0.2.0"
+
 # Apply ncps CfCCell broadcasting patch on library load
 import torch
 import ncps.torch

@@ -109,7 +109,11 @@ class FTTransformerSequenceModel(nn.Module, ISequenceModel):
             batch_first=True,
             norm_first=True
         )
-        self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=self.n_layers)
+        self.transformer = nn.TransformerEncoder(
+            encoder_layer,
+            num_layers=self.n_layers,
+            enable_nested_tensor=False
+        )
         self.norm = nn.LayerNorm(self.d_token)
         
         # Output projection head to project representation back to hypervector dimension

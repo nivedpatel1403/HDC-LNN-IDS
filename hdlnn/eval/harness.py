@@ -1174,8 +1174,19 @@ def run_experiment(
         metrics["calibration"] = calibration_summary
     else:
         metrics["calibration"] = {"method": "default", "threshold": getattr(scorer, "threshold", 0.0)}
+
+    # Resolve dataset_name: root override takes precedence over base data.dataset_name
+    data_cfg = getattr(config, "data", None)
+    dataset_name = None
+    if hasattr(config, "get"):
+        dataset_name = config.get("dataset_name")
+    if dataset_name is None and data_cfg is not None and hasattr(data_cfg, "get"):
+        dataset_name = data_cfg.get("dataset_name")
+    if dataset_name is None:
+        dataset_name = "unknown"
+
     metrics["experiment"] = {
-        "dataset": config.data.get("dataset_name", "unknown"), "model": baseline_name,
+        "dataset": dataset_name, "model": baseline_name,
         "random_seed": config.seed, "hdc_dimension": D,
         "sequence_length": config.model.get("sequence_length", 16),
         "training_epochs": config.model.get("epochs", 5),

@@ -184,25 +184,6 @@ class DivergenceScorer(IDivergenceScorer):
         except Exception as e:
             logger.warning("Failed to fit distilled student MLP: %s", e)
 
-    def fit_quadratic_boundary(self, val_states: torch.Tensor, val_labels: np.ndarray) -> None:
-        """Fits an exact 5-D quadratic decision boundary on [fish, lr, fish^2, lr^2, fish*lr]."""
-        try:
-            from sklearn.linear_model import LogisticRegression
-            d_norm = self.manifold.compute_mahalanobis_distance(val_states)
-            d_att = self.attack_manifold.compute_mahalanobis_distance(val_states)
-            lr = (d_norm / (d_att + self.lr_epsilon)).cpu().numpy()
-            
-            fish = (val_states @ self.w_discriminant).cpu().numpy() if self.w_discriminant is not None else np.zeros_like(lr)
-            
-            X_q = np.stack([fish, lr, fish**2, lr**2, fish * lr], axis=1)
-            clf = LogisticRegression(max_iter=500, C=1.0, random_state=42).fit(X_q, val_labels)
-            
-            self.w_quad = torch.tensor(clf.coef_[0], dtype=torch.float32, device=val_states.device)
-            self.b_quad = float(clf.intercept_[0])
-            logger.info("Fitted 5-D quadratic decision boundary successfully.")
-        except Exception as e:
-            logger.warning("Failed to fit quadratic decision boundary: %s", e)
-
     def fit_linear_boundary(self, val_states: torch.Tensor, val_labels: np.ndarray) -> None:
         """Fits an exact 66-D linear decision boundary on [h_t, fish_proj, lr_score] using Logistic Regression."""
         try:
@@ -458,7 +439,8 @@ class DivergenceScorer(IDivergenceScorer):
                 prob_t = float(torch.sigmoid(logit).item())
                 
                 if self.residual_alpha > 0.0:
-                    base_prob = 1.0 / (1.0 + np.exp(-(lr_val - self.base_lr_mean) / (self.base_lr_std + 1e-5)))
+                    exp_arg = np.clip(-(lr_val - self.base_lr_mean) / (self.base_lr_std + 1e-5), -50.0, 50.0)
+                    base_prob = 1.0 / (1.0 + np.exp(exp_arg))
                     return float(base_prob + self.residual_alpha * (prob_t - base_prob))
                 return prob_t
                 
@@ -590,7 +572,8 @@ class DivergenceScorer(IDivergenceScorer):
             
         # 2. Compute Cosine Distance: 1 - CosineSimilarity
         similarity = torch.cosine_similarity(observed_hv.unsqueeze(0), predicted_hv.unsqueeze(0))
-        cosine_dist = float(1.0 - similarity.item())
+        similarity = torch.clamp(similarity, min=-1.0, max=1.0)
+        cosine_dist = max(0.0, float(1.0 - similarity.item()))
 
         # 3. Update adaptive EWMA threshold
         stats = self.ewma_stats.get(entity_id, (0.0, 0.0, 0))

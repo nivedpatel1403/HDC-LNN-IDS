@@ -73,6 +73,32 @@ def test_encoders():
     assert h_last.shape == (2, 2 * 64 * 16)
     print("  -> MambaSequenceModel forward pass: PASSED")
     
+    # 4. Test MambaSequenceModel step() method and representation parity
+    print("\n4. Testing MambaSequenceModel step() and conv tap history...")
+    mamba_model.reset_state()
+    h_prev = torch.zeros(2, 2 * 64 * 16)
+    
+    # Single step
+    x_t0 = x_dummy[:, 0]
+    out_f, h_next = mamba_model.step(x_t0, h_prev)
+    assert out_f.shape == (2, 64), f"Expected out_f shape (2, 64), got {out_f.shape}"
+    assert h_next.shape == (2, 2 * 64 * 16), f"Expected next_state shape (2, 2048), got {h_next.shape}"
+    
+    # Backward compatible indexing
+    assert out_f[0].shape == (64,)
+    pred_vec = mamba_model.predict_next_vector(out_f)
+    assert pred_vec.shape == (2, 1024)
+    
+    # Sequential streaming parity across all steps
+    mamba_model.reset_state()
+    h_stream = torch.zeros(2, 2 * 64 * 16)
+    for t in range(8):
+        step_out, h_stream = mamba_model.step(x_dummy[:, t], h_stream)
+        
+    diff = (h_last - h_stream).abs().max().item()
+    assert diff < 1e-5, f"Streaming state diverged from forward state: diff={diff}"
+    print(f"  -> MambaSequenceModel step streaming parity: PASSED (max diff={diff:.2e})")
+    
     print("\n=== ALL ENCODER AND MODEL TESTS COMPLETED ===")
 
 

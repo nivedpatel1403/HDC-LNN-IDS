@@ -52,7 +52,7 @@ All evaluated models stay below 3.5 million parameters, well within the 1-billio
 - **Strict Data Isolation**: Enforces entity-disjoint splits between training, validation, and testing. Codebooks fit only on benign training flows.
 - **Low Streaming Latency**: Averages 59.2 microseconds per flow (approximately 16,889 flows per second) during single-flow CPU inference.
 - **Web Dashboard**: Provides a browser interface built with FastAPI and WebSockets for monitoring score drift, testing synthetic attacks, and logging alerts.
-- **Packaged Datasets**: Includes 41 network flow CSV datasets covering UNSW-NB15, KDD Cup 99, NSL-KDD, ToN-IoT, and IoT-23.
+- **Packaged Benchmark Datasets**: Includes primary network flow CSV datasets (`UNSW_NB15_testing-set.csv`, `kdd_test.csv`, `ton-iot.csv`) directly in `datasets/` for immediate out-of-the-box smoke testing and verification, with full acquisition instructions and schema mappings for the extended 41-benchmark suite in `datasets/SOURCES.md`.
 
 ---
 
@@ -103,7 +103,9 @@ HDC-LNN2/
 │   ├── README.md                       # Dataset inventory
 │   ├── SOURCES.md                      # Source citations and download links
 │   ├── UNSW_NB15_testing-set.csv       # Primary 30,000-flow benchmark
-│   └── ...                             # 41 CSV datasets
+│   ├── kdd_test.csv                    # KDD Cup benchmark test dataset
+│   ├── ton-iot.csv                     # ToN-IoT telemetry sample
+│   └── ...                             # Packaged sample flows (full 41 datasets via SOURCES.md)
 ├── hdlnn/                              # Main Python package
 │   ├── baselines/                      # Comparison models (Mamba-2, CNN, AE, LSTM, Transformers)
 │   ├── common/                         # Configuration loading, logging, and parameter counting
@@ -134,6 +136,7 @@ HDC-LNN2/
 ├── REPLICATION_RESULTS.md          # Replicated 4-seed evaluation report
 ├── run_all_baselines.py            # Multi-model evaluation script
 ├── run_all_datasets.py             # Multi-dataset batch evaluation script
+├── generate_table.py               # Benchmark comparison markdown table generator
 ├── evaluate_encoder_separability.py # Encoder geometric study script
 └── README.md                       # Project operating manual
 ```
@@ -155,7 +158,7 @@ HDC-LNN2/
 ### Hardware
 - CPU: x86_64 or Apple Silicon (arm64). Single-core CPU streaming inference reaches approximately 16,000 flows per second.
 - RAM: Minimum 8 GB (16 GB recommended for full-scale evaluations on 30,000 contiguous flows).
-- Disk space: Approximately 4.5 GB total for code, dependencies, and all 41 benchmark flow datasets.
+- Disk space: Approximately 500 MB for repository code, packaged sample datasets, and virtual environment (or ~4.5 GB if all 41 external benchmark captures are downloaded).
 
 ### Software
 - Operating system: macOS, Linux, or Windows (WSL2 recommended on Windows).
@@ -188,6 +191,7 @@ Install the package in editable mode with development dependencies:
 pip install --upgrade pip
 pip install -e ".[dev]"
 ```
+This installs the `hdlnn` package and registers the `hdlnn` command-line entrypoint.
 
 ---
 
@@ -210,18 +214,18 @@ cp .env.example .env
 
 ## Datasets
 
-Primary benchmark datasets are included directly in the `datasets/` directory:
-- UNSW-NB15: `UNSW_NB15_testing-set.csv` (15 MB, primary 30,000-flow benchmark).
-- KDD and NSL-KDD: `kdd_test.csv` (3.1 MB, primary KDD evaluation dataset).
-- ToN-IoT: `ton-iot.csv` (IoT network telemetry dataset).
+Primary sample and benchmark datasets are packaged directly in the `datasets/` directory of the repository for zero-setup execution, quick smoke testing, and regression verification:
+- **UNSW-NB15**: `UNSW_NB15_testing-set.csv` (15 MB, primary 30,000-flow benchmark) and `UNSW_NB15_training-set.csv`.
+- **KDD and NSL-KDD**: `kdd_test.csv` (3.1 MB, primary KDD evaluation benchmark) and `kdd_train.csv`.
+- **ToN-IoT**: `ton-iot.csv` (sample IoT network telemetry dataset).
 
-For download links, schema mappings, and citations for extended captures (IoT-23, UNSW Botnet, and multi-part raw flow dumps), see [`datasets/SOURCES.md`](datasets/SOURCES.md).
+For download links, checksums, schema mappings, and citations for the full 41-benchmark suite (including multi-gigabyte IoT-23 captures, UNSW Botnet dumps, and raw multi-part flow captures), see [`datasets/SOURCES.md`](datasets/SOURCES.md).
 
 ---
 
 ## Running the Baseline Benchmark Suite
 
-The primary script is [`run_all_baselines.py`](run_all_baselines.py). It evaluates all seven architectures under deterministic seeding and entity-disjoint isolation.
+The primary script is [`run_all_baselines.py`](run_all_baselines.py). It evaluates all seven architectures under deterministic seeding and entity-disjoint isolation, saving run outputs to `runs/` and defaulting table export to `runs/comparison_table.md` to protect canonical documentation.
 
 ### 1. Fast smoke test
 Runs 5,000 flows with 1 epoch for rapid validation:
@@ -292,11 +296,11 @@ This computes centroid cosine distance, normalized Euclidean distance, Fisher ra
 
 ## Batch Multi-Dataset Runner
 
-Evaluate HDC-LNN across all datasets in `datasets/`:
+Evaluate HDC-LNN across all datasets present in `datasets/`:
 ```bash
-python run_all_datasets.py
+python run_all_datasets.py --quick
 ```
-This writes summary statistics to `DATASET_EVALUATION_SUMMARY.md`.
+By default, this writes run artifacts to `runs/` and consolidated statistics to `runs/dataset_evaluation_summary.md`, preserving the canonical `DATASET_EVALUATION_SUMMARY.md`. Use `--output <path>` to specify an alternative destination.
 
 ---
 
@@ -304,9 +308,9 @@ This writes summary statistics to `DATASET_EVALUATION_SUMMARY.md`.
 
 Run the test suite:
 ```bash
-pytest
+pytest tests/ -v
 ```
-All 20 tests pass in approximately 2 seconds, checking encoder parity, manifold fitting, temporal splitters, SIMD fallback, and threat injectors.
+All 63 tests pass cleanly in approximately 35–40 seconds, checking encoder parity, manifold fitting, temporal splitters, SIMD fallback, threat injectors, CfC batch broadcasting, Mamba-2 streaming parity, and config schema hierarchy.
 
 ---
 
@@ -316,7 +320,7 @@ To verify the setup:
 1. Clone the repository and enter the directory.
 2. Create and activate a virtual environment.
 3. Install dependencies with `pip install -e ".[dev]"`.
-4. Run `pytest` to confirm all 20 tests pass.
+4. Run `pytest tests/ -v` to confirm all 63 tests pass.
 5. Run `python run_all_baselines.py --quick` to test the benchmark suite across all seven models.
 6. Run `python evaluate_encoder_separability.py --limit 1000` to verify hyperspace metric calculation.
 

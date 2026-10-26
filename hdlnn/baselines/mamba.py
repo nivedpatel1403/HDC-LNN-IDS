@@ -9,6 +9,31 @@ from hdlnn.contracts.interfaces import ISequenceModel
 logger = logging.getLogger(__name__)
 
 
+class MambaStepOutput(tuple):
+    """Container for Mamba step output conforming to Tuple[torch.Tensor, torch.Tensor].
+    
+    Provides (out_feature, next_state) while supporting legacy 2D indexing [batch_idx, slice]
+    for backward compatibility with existing evaluation scripts.
+    """
+    def __new__(cls, out_feature: torch.Tensor, next_state: torch.Tensor):
+        return super().__new__(cls, (out_feature, next_state))
+        
+    @property
+    def out(self) -> torch.Tensor:
+        return self[0]
+        
+    @property
+    def state(self) -> torch.Tensor:
+        return self[1]
+        
+    def __getitem__(self, item):
+        if isinstance(item, tuple):
+            batch_idx = item[0]
+            feature_slice = item[1] if len(item) > 1 else slice(None)
+            return self[0][batch_idx, feature_slice]
+        return super().__getitem__(item)
+
+
 class PurePyTorchSSM(nn.Module):
     """Pure-PyTorch Selective State-Space (Mamba-style) block without custom CUDA dependencies.
     
@@ -68,6 +93,41 @@ class PurePyTorchSSM(nn.Module):
         
         # 5. Out-projection
         self.out_proj = nn.Linear(self.d_inner, self.d_model, bias=False)
+        self._conv_state: Optional[torch.Tensor] = None
+
+    def reset_conv_state(self) -> None:
+        """Resets the causal convolution tap history."""
+        self._conv_state = None
+
+    def _conv_step(self, x_inner: torch.Tensor) -> torch.Tensor:
+        """Evaluates causal convolution step while maintaining full conv tap history.
+        
+        Args:
+            x_inner: Current input tensor of shape [batch_size, d_inner]
+            
+        Returns:
+            x_conv: Convolved and activated tensor of shape [batch_size, d_inner]
+        """
+        batch_size, d_inner = x_inner.shape
+        hist_len = self.d_conv - 1
+        
+        if (
+            self._conv_state is None
+            or self._conv_state.shape[0] != batch_size
+            or self._conv_state.shape[1] != d_inner
+            or self._conv_state.device != x_inner.device
+        ):
+            self._conv_state = torch.zeros(
+                batch_size, d_inner, hist_len,
+                device=x_inner.device, dtype=x_inner.dtype
+            )
+            
+        conv_window = torch.cat([self._conv_state, x_inner.unsqueeze(-1)], dim=-1)
+        w = self.conv1d.weight.squeeze(1).unsqueeze(0)  # [1, d_inner, d_conv]
+        b = self.conv1d.bias  # [d_inner]
+        x_conv = (conv_window * w).sum(dim=-1) + b
+        self._conv_state = conv_window[:, :, 1:]
+        return F.silu(x_conv)
 
     def _selective_scan(
         self,
@@ -122,6 +182,7 @@ class PurePyTorchSSM(nn.Module):
         h0: Optional[torch.Tensor] = None
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """Runs selective SSM block forward pass."""
+        self.reset_conv_state()
         batch_size, seq_len, _ = x.shape
         
         # 1. Project to [B, L, 2 * d_inner] and split into x_inner and gate z
@@ -207,14 +268,23 @@ class MambaSequenceModel(nn.Module, ISequenceModel):
         out, h_last = self.ssm(x_proj, h0=h0)
         return out, h_last
 
-    def step(self, x: torch.Tensor, h_prev: torch.Tensor, dt: torch.Tensor) -> torch.Tensor:
+    def reset_state(self) -> None:
+        """Resets the causal convolution tap history and internal state."""
+        self.ssm.reset_conv_state()
+
+    def step(
+        self, 
+        x: torch.Tensor, 
+        h_prev: torch.Tensor, 
+        dt: Optional[torch.Tensor] = None
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
         """Evaluates continuous state transition for a single time step.
         
-        Uses direct single-step vectorized formulation to avoid PyTorch Conv1d grouped-convolution
-        dispatch overhead while guaranteeing exact mathematical equivalence.
-        Returns a composite tensor: [batch_size, hidden_dim + d_inner * d_state]
-        where the first hidden_dim slice contains the output feature vector (for next-vector projection)
-        and the remaining slice contains the internal SSM recurrent state.
+        Maintains causal convolution tap history across streaming steps and evaluates
+        the selective SSM recurrence.
+        Returns a (out_feature, next_state) MambaStepOutput tuple matching forward() state dimension:
+          - out_feature: shape [batch_size, hidden_dim]
+          - next_state: shape [batch_size, d_inner * d_state]
         """
         if x.dim() == 1:
             x = x.unsqueeze(0)
@@ -224,6 +294,9 @@ class MambaSequenceModel(nn.Module, ISequenceModel):
         ssm_state_size = d_inner * d_state
         batch_size = x.size(0)
         
+        if isinstance(h_prev, tuple):
+            h_prev = h_prev[1]
+            
         if h_prev.dim() == 1:
             h_prev = h_prev.unsqueeze(0)
             
@@ -231,6 +304,7 @@ class MambaSequenceModel(nn.Module, ISequenceModel):
             h0 = h_prev[:, -ssm_state_size:].view(batch_size, d_inner, d_state)
         else:
             h0 = torch.zeros((batch_size, d_inner, d_state), device=x.device, dtype=x.dtype)
+            self.ssm.reset_conv_state()
             
         # 1. Project input: [B, D] -> [B, hidden_dim]
         x_proj = self.in_proj(x)
@@ -239,10 +313,8 @@ class MambaSequenceModel(nn.Module, ISequenceModel):
         xz = self.ssm.in_proj(x_proj)
         x_inner, z = xz.chunk(2, dim=-1)
         
-        # 3. Direct depthwise conv step (evaluating causal tap without Conv1d dispatch)
-        w_tap = self.ssm.conv1d.weight[:, 0, -1]
-        b_conv = self.ssm.conv1d.bias
-        x_conv = F.silu(x_inner * w_tap + b_conv)
+        # 3. Depthwise causal conv step maintaining history buffer
+        x_conv = self.ssm._conv_step(x_inner)
         
         # 4. Project SSM parameters
         ssm_params = self.ssm.x_proj(x_conv)
@@ -263,12 +335,16 @@ class MambaSequenceModel(nn.Module, ISequenceModel):
         y = (new_h * C_proj.unsqueeze(1)).sum(dim=-1) + x_conv * self.ssm.D
         y_gated = y * F.silu(z)
         out_feature = self.ssm.out_proj(y_gated)
+        next_state = new_h.reshape(batch_size, -1)
         
-        # Composite state: [out_features, ssm_state]
-        return torch.cat([out_feature, new_h.reshape(batch_size, -1)], dim=-1)
+        return MambaStepOutput(out_feature, next_state)
 
     def predict_next_vector(self, state: torch.Tensor) -> torch.Tensor:
-        """Projects hidden state sequence/vector back to hypervector space."""
+        """Projects hidden state representation back to hypervector space."""
         if self.projection_head is None:
             raise ValueError("Projection head not configured in MambaSequenceModel.")
+        if isinstance(state, tuple):
+            state = state[0]
+        elif state.size(-1) > self.hidden_dim:
+            state = state[..., :self.hidden_dim]
         return self.projection_head(state)

@@ -27,7 +27,7 @@ import torch
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import f1_score, precision_score, recall_score, roc_auc_score
 
-from hdlnn.common.config import load_config
+from hdlnn.common.config import load_config, resolve_experiment_config
 from hdlnn.eval.harness import run_experiment
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -53,9 +53,12 @@ def main():
     baseline_records = []
     for s in SEEDS:
         for ds_name, src_file, cfg_path in PRIMARY_DATASETS:
+            if not Path(src_file).exists():
+                logger.warning(f"Dataset file {src_file} not found. Skipping {ds_name}.")
+                continue
             b_path = Path(f"runs/phase29_audit/baseline_runs/p29_baseline_s{s}_{ds_name}/metrics.json")
             if b_path.exists():
-                m = json.loads(b_path.read_text())
+                m = json.loads(b_path.read_text(encoding="utf-8"))
                 baseline_records.append({
                     "seed": s, "dataset": ds_name,
                     "f1": m["f1_score"], "precision": m["precision"], "recall": m["recall"],
@@ -66,7 +69,7 @@ def main():
                 })
             else:
                 logger.info(f"Running baseline seed={s} dataset={ds_name}")
-                cfg = load_config(Path(cfg_path))
+                cfg = resolve_experiment_config(cfg_path, ds_name, src_file)
                 cfg.seed = s
                 res = run_experiment(
                     config=cfg,
@@ -92,11 +95,14 @@ def main():
     lin_records = []
     for s in SEEDS:
         for ds_name, src_file, cfg_path in PRIMARY_DATASETS:
+            if not Path(src_file).exists():
+                logger.warning(f"Dataset file {src_file} not found. Skipping {ds_name}.")
+                continue
             l_path = Path(f"runs/test_p30_eval/p30_lin_s{s}_{ds_name}/metrics.json")
             if l_path.exists():
-                m = json.loads(l_path.read_text())
+                m = json.loads(l_path.read_text(encoding="utf-8"))
             else:
-                cfg = load_config(Path(cfg_path))
+                cfg = resolve_experiment_config(cfg_path, ds_name, src_file)
                 cfg.seed = s
                 cfg.divergence._data["use_instantaneous_fusion"] = True
                 cfg.divergence._data["fusion_subspace_dim"] = -1
@@ -120,6 +126,10 @@ def main():
             })
     df_lin = pd.DataFrame(lin_records)
     
+    if df_base.empty or df_lin.empty:
+        logger.warning("No baseline or linear fusion runs were completed. Exiting gracefully.")
+        return
+
     # Compute Aggregates
     macro_base = df_base.groupby("seed").agg({
         "f1": "mean", "precision": "mean", "recall": "mean",
@@ -156,6 +166,7 @@ def main():
         }
     }
     
+    (out_base / "phase30_fusion_summary.json").parent.mkdir(parents=True, exist_ok=True)
     with open(out_base / "phase30_fusion_summary.json", "w", encoding="utf-8") as f:
         json.dump(summary_results, f, indent=4)
         

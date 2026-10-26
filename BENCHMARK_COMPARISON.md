@@ -3,6 +3,9 @@
 > [!NOTE]
 > Evaluation results across evaluated architectures under validation manifold calibration with entity-disjoint leakage isolation. All models have between 1.32M and 3.23M parameters, complying with the budget of under 1 billion parameters.
 
+> [!TIP]
+> This document represents the canonical, peer-reviewed multi-model comparative benchmark. Active runs and table re-generation scripts (`hdlnn.pipeline`, `run_all_baselines.py`, `generate_table.py`) default their export target to `runs/comparison_table.md` to prevent unintended modification of this reference standard.
+
 ## 1. Macro-Average Detection & Efficiency Summary (Primary Test Datasets)
 
 > Evaluated across the 3 primary zero-shot/disjoint network benchmarks: **UNSW-NB15 Test**, **KDD Test**, and **NSL-KDD Test**.

@@ -2,11 +2,6 @@ import os
 import sys
 from pathlib import Path
 
-# Ensure project root is on sys.path
-PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
-
 import csv
 import json
 import time
@@ -17,7 +12,7 @@ import uvicorn
 import numpy as np
 from typing import List, Dict, Any, Optional
 
-from fastapi import FastAPI, Request, Query, UploadFile, File
+from fastapi import FastAPI, Request, Query
 from fastapi.responses import HTMLResponse, StreamingResponse, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -25,7 +20,7 @@ from hdlnn.common.config import load_config
 from hdlnn.eval.harness import run_experiment
 from hdlnn.data.loaders import load_dataset_flows
 from hdlnn.data.splitter import split_dataset
-from run_all_baselines import match_config_for_dataset, find_dataset_files, BASELINES
+from hdlnn.common.dataset_utils import match_config_for_dataset, find_dataset_files, BASELINES
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger("benchmark_dashboard")

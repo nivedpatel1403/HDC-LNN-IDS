@@ -43,9 +43,15 @@ dev = [
     "pytest-cov>=4.0.0"
 ]
 
+[project.scripts]
+hdlnn = "hdlnn.pipeline:main"
+
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["hdlnn*"]
+
+[tool.setuptools.package-data]
+"hdlnn.deploy" = ["static/*"]
 
 [tool.pytest.ini_options]
 minversion = "7.0"

@@ -152,16 +152,13 @@ class ReferenceManifold:
         if not self.is_fit:
             raise RuntimeError("Cannot compute distance: ReferenceManifold is not fit.")
 
-        is_batched = states.dim() == 2
-        if not is_batched:
+        if states.dim() == 1:
             states = states.unsqueeze(0)  # Shape: [1, hidden_dim]
 
         if self.hidden_dim > 1000:
             sim = torch.cosine_similarity(states, self.mean.unsqueeze(0), dim=-1)
             dist = torch.clamp(1.0 - sim, min=0.0)
-            if not is_batched:
-                return dist.squeeze(0)
-            return dist
+            return dist.view(-1)
 
         # Vectorized Multi-Cluster Fast Path
         if self.means_stacked is not None:
@@ -175,34 +172,29 @@ class ReferenceManifold:
                 diff_sh = diff @ sh_inv # [batch, K, hidden_dim]
                 sq_dist = torch.clamp(torch.sum(diff_sh * diff, dim=-1), min=0.0) # [batch, K]
                 dist = torch.sqrt(sq_dist).min(dim=-1).values # [batch]
-                if not is_batched:
-                    return dist.squeeze(0)
-                return dist
+                return dist.view(-1)
             elif self.covariance_type == "diagonal" and self.diag_inv_covs_stacked is not None:
                 # diff: [batch, K, hidden_dim]
                 diff = states.unsqueeze(1) - means_st.unsqueeze(0)
                 diag_st = self.diag_inv_covs_stacked.to(device=states.device, dtype=states.dtype)
                 sq_dist = torch.clamp(torch.sum((diff ** 2) * diag_st.unsqueeze(0), dim=-1), min=0.0) # [batch, K]
                 dist = torch.sqrt(sq_dist).min(dim=-1).values # [batch]
-                if not is_batched:
-                    return dist.squeeze(0)
-                return dist
+                return dist.view(-1)
             elif self.inv_covs_stacked is not None:
                 inv_st = self.inv_covs_stacked.to(device=states.device, dtype=states.dtype)
-                if not is_batched or states.size(0) == 1:
+                if states.size(0) == 1:
                     # Single-flow fast path: avoid full batch broadcast
-                    st_vec = states if states.dim() == 2 else states.unsqueeze(0)
-                    diff = st_vec - means_st # [K, H] via broadcasting
+                    diff = states - means_st # [K, H] via broadcasting
                     diff_inv = torch.bmm(diff.unsqueeze(1), inv_st).squeeze(1) # [K, H]
                     sq_dist = torch.clamp(torch.sum(diff_inv * diff, dim=-1), min=0.0)
-                    dist = torch.sqrt(sq_dist.min())
+                    dist = torch.sqrt(sq_dist.min()).view(1)
                     return dist
                 else:
                     # Multi-flow batch path
                     diff = states.unsqueeze(1) - means_st.unsqueeze(0) # [B, K, H]
                     diff_inv = torch.einsum('bkh,khe->bke', diff, inv_st)
                     sq_dist = torch.clamp(torch.sum(diff_inv * diff, dim=-1), min=0.0) # [B, K]
-                    return torch.sqrt(sq_dist).min(dim=-1).values
+                    return torch.sqrt(sq_dist).min(dim=-1).values.view(-1)
 
         # Single cluster fallback
         mean = self.mean.to(device=states.device, dtype=states.dtype)
@@ -211,7 +203,4 @@ class ReferenceManifold:
         temp = diff @ inv_cov
         squared_dist = torch.clamp(torch.sum(temp * diff, dim=-1), min=0.0)
         dist = torch.sqrt(squared_dist)
-
-        if not is_batched:
-            return dist.squeeze(0)
-        return dist
+        return dist.view(-1)

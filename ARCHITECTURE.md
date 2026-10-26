@@ -50,7 +50,7 @@ The unified architecture below treats the HDC-LNN research core as the **source 
 |---|---|
 | Product framing, threat narratives, SOAR/SIEM integration target | Layered architecture (L1–L5) with strict downward dependencies |
 | Closed-form ODE math for the liquid core (Section 9) | CfC via `ncps` as the reference implementation, not a from-scratch solver |
-| Cache-line-aware vector sizing rationale | torchhd-based encoder, D=10,000 default, entity-disjoint splitting |
+| Cache-line-aware vector sizing rationale | Pure PyTorch tensor HDC encoder (binding, bundling, level codebooks), D=10,000 default, entity-disjoint splitting |
 | Cosine-distance predictive scoring as a fast secondary signal | Mahalanobis divergence against a purity-controlled reference manifold as the primary scorer |
 | Phase 4 production benchmarking & SIEM hook | Phase 3 evaluation harness, named baselines, ablation runner |
 
@@ -108,14 +108,14 @@ HYDRA-LNN's production concerns — Kafka ingestion, SIMD acceleration, SOAR aut
 
 ### 4.1 Spatial Layer — Hyperdimensional Encoding
 
-Each log event or flow record is mapped into a fixed-size, high-dimensional bipolar vector space using **torchhd** as the reference implementation (HDC-LNN), replacing the from-scratch AVX-512 bit-manipulation approach originally proposed in HYDRA-LNN. The from-scratch SIMD path is retained as an optional, later-phase hardware-acceleration backend once the algorithm is validated (see Phase 4, Section 10) — it is a performance optimization, not the reference definition of correctness.
+Each log event or flow record is mapped into a fixed-size, high-dimensional bipolar vector space using **native PyTorch tensor operations** (`hdlnn.hdc`, implementing level codebooks, bipolar item memory, binding, and bundling in pure PyTorch), replacing the from-scratch AVX-512 bit-manipulation approach originally proposed in HYDRA-LNN and eliminating external HDC library dependencies. The from-scratch SIMD path is retained as an optional, later-phase hardware-acceleration backend once the algorithm is validated (see Phase 4, Section 10) — it is a performance optimization, not the reference definition of correctness.
 
-- **Binding (⊗)** — pairs a field's key with its value (e.g., binds `source_ip` to `10.0.0.5`) while keeping the result mathematically distinct from both inputs.
-- **Bundling (⊕)** — combines multiple bound key–value pairs into a single vector representing the whole event via addition and majority-rule thresholding.
-- **Permutation (Πₖ)** — a cyclic shift encoding order and structure, such as a process-execution tree or network hop path.
+- **Binding (⊗)** — pairs a field's key with its value (e.g., binds `source_ip` to `10.0.0.5`) via in-place elementwise multiplication (`torch.addcmul_`), keeping the result mathematically distinct from both inputs.
+- **Bundling (⊕)** — combines multiple bound key–value pairs into a single vector representing the whole event via accumulator addition and bipolar sign thresholding (`torch.sign`).
+- **Permutation (Πₖ)** — a cyclic roll encoding order and structure, such as a process-execution tree or network hop path.
 - **Continuous fields** (byte counts, durations) use an ordered "thermometer" codebook so vector similarity scales smoothly with numeric distance.
 
-Vector dimensionality: research default **D=10,000** (torchhd standard, HDC-LNN) rather than the 16,384-bit / 2,048-byte cache-line-tuned dimension proposed in HYDRA-LNN. **Dimensionality is a config-toggleable parameter**, not a hardcoded constant — the cache-alignment rationale is reintroduced explicitly as a production-tuning profile in Section 7, applied only after the research-default dimension has been validated for detection accuracy.
+Vector dimensionality: research default **D=10,000** (canonical HDC standard, HDC-LNN) rather than the 16,384-bit / 2,048-byte cache-line-tuned dimension proposed in HYDRA-LNN. **Dimensionality is a config-toggleable parameter**, not a hardcoded constant — the cache-alignment rationale is reintroduced explicitly as a production-tuning profile in Section 7, applied only after the research-default dimension has been validated for detection accuracy.
 
 > **ℹ Stateless by design**
 > The encoder is stateless per record — all "memory" lives in the frozen Item Memory (Section 5), not in the encoder itself. This is what makes the encoder safe to run in both batch (research) and streaming (production) modes without behavioral drift between the two.
@@ -141,6 +141,35 @@ The two source documents proposed different scorers. Rather than pick one, the u
 | **Secondary / fast-path** | Cosine distance between the LNN's predicted next-state vector and the observed vector, adaptive threshold via EWMA (mean + k·σ) | Cheap, low-latency signal suitable for a streaming pre-filter ahead of the heavier Mahalanobis scorer in high-throughput production deployments |
 
 **Recommendation:** validate detection quality (F1, AUROC, FPR@95%TPR — Section 7) using the Mahalanobis scorer as the primary metric during Phases 1–3. Promote the cosine/EWMA scorer to an always-on production pre-filter only in Phase 4, once its false-negative rate against the Mahalanobis scorer has itself been benchmarked — a fast filter that quietly drops true positives is worse than no filter.
+
+### 4.4 Engineering Hardening & Numerical Robustness (v2.0 Enhancements)
+
+To guarantee production-grade reproducibility and mathematical consistency across training and line-rate streaming, the architecture incorporates the following core enhancements:
+
+1. **Continuous-Time CfC Batch Broadcasting & Timespan Reshaping (`hdlnn/lnn/cfc_cell.py`)**:
+   - Resolved upstream `ncps.torch.CfCCell` batch broadcasting limitation by dynamically reshaping 1D timespan inputs to 2D tensors `(batch_size, 1)`.
+   - Clamped inter-arrival time intervals $\Delta t \ge 0.0$ and guarded extreme transition gaps to $[\epsilon, 1000.0]$ to prevent numerical divergence over irregular flow arrivals.
+
+2. **Mamba-2 Streaming Representation Parity & Causal Conv History (`hdlnn/baselines/mamba.py`)**:
+   - Harmonized state representations between batch sequence processing `forward()` and step-by-step streaming `step()` to shape `(B, 2048)`.
+   - Implemented causal 1D convolution buffer history tracking within `PurePyTorchSSM.step()`, achieving exact streaming numerical parity ($< 7.5 \times 10^{-9}$ floating-point divergence) relative to sequence forward evaluation.
+   - Encapsulated output in `MambaStepOutput(tuple)` supporting backward-compatible tuple unpacking `(output, state)`.
+
+3. **Ledoit-Wolf Manifold Regularization & Batch Invariance (`hdlnn/divergence/manifold.py`)**:
+   - Calibrated the normal traffic reference manifold via empirical Ledoit-Wolf covariance shrinkage (`sklearn.covariance.LedoitWolf`) fit strictly on the normal validation slice.
+   - Guaranteed that `compute_mahalanobis_distance()` consistently returns a 1-D tensor of shape `(B,)` (or `(1,)` for unbatched flow inputs) across all five covariance modes (`full`, `diagonal`, `shared`, `identity`, `cosine`), eliminating 0-D scalar shape errors.
+
+4. **Divergence Scorer Stability & Boundary De-duplication (`hdlnn/divergence/scorer.py`)**:
+   - De-duplicated `fit_quadratic_boundary` implementation.
+   - Clamped cosine distances to non-negative ranges $[0.0, 2.0]$ and clipped likelihood ratio exponential arguments to $[-50.0, 50.0]$ to eliminate floating-point overflow under extreme outlier vectors.
+
+5. **Bidirectional Config Schema Hierarchy Normalization (`hdlnn/common/config.py`)**:
+   - Implemented bidirectional schema synchronization between document root and the `data:` block for dataset keys (`dataset_name`, `entity_id_column`, `entity_id_modulo`, `cache_dir`, `split_version`).
+   - Enabled transparent property delegation via `Config.__getattr__` and `Config.get()`, ensuring specialized dataset loaders (TON-IoT, IoT-23, KDD) retain authentic entity trajectory partitioning instead of defaulting to synthetic IP generators.
+
+6. **Non-Destructive Reporting & Package Boundary Isolation (`hdlnn/report/tables.py`, `hdlnn/common/dataset_utils.py`)**:
+   - Decoupled `hdlnn/deploy/gui_server.py` and `hdlnn/report/tables.py` from top-level script imports via standalone dataset resolution utilities.
+   - Routed all routine pipeline runs and benchmark table generation to `runs/comparison_table.md` and `runs/dataset_evaluation_summary.md`, protecting canonical published benchmarks (`BENCHMARK_COMPARISON.md`) from clobbering.
 
 ---
 
@@ -268,7 +297,7 @@ The two source roadmaps are merged into one sequence. Research-correctness phase
 | Phase | Timeline | Focus | Exit criteria |
 |---|---|---|---|
 | **0** | Weeks 1–2 | Foundation & data pipeline (L1–L2): contracts, config, logging, seeds; loaders for UNSW-NB15 / CICIoT2023 / NSL-KDD; entity-disjoint splitter | Splits are versioned and committed; quality checks pass |
-| **1** | Weeks 3–6 | HDC core: torchhd-based encoder, item memory fit on TRAIN only, OOV handling | >100,000 log vectorizations/sec; zero OOV leakage in val/test |
+| **1** | Weeks 3–6 | HDC core: native PyTorch tensor encoder (`hdlnn.hdc`), item memory fit on TRAIN only, OOV handling | >100,000 log vectorizations/sec; zero OOV leakage in val/test |
 | **2** | Weeks 7–10 | LNN core & Divergence Engine: CfC via ncps; Reference Manifold fit on val-normal slice; both scorers implemented behind IDivergenceScorer | Batch/streaming numerical parity verified |
 | **3** | Weeks 11–16 | Evaluation harness & validation: baselines (LSTM, CNN, HDC-only, LNN-only); synthetic attack injection (Section 8 scenarios); ablations | Full metrics suite produced with a citable run_id; this is what Section 7's numbers will come from |
 | **4** | Weeks 17–22 | Production hardening: SIMD/AVX-512 backend, Kafka ring-buffer ingest, sidecar container, SOAR/SIEM connector | Streaming path benchmarked at 50,000 events/sec against Phase 3 accuracy numbers, not new ones |

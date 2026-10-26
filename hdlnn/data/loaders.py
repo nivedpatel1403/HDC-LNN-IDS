@@ -138,16 +138,46 @@ def load_dataset_flows(config: Any, data_dir: Path, source_file: str, limit: Opt
     if not csv_path.exists():
         raise FileNotFoundError(f"Source CSV not found: {csv_path}")
 
-    entity_id_column = config.data.get("entity_id_column")
+    # Backward-compatible resolution across root and data block
+    data_cfg = getattr(config, "data", None)
+    entity_id_column = None
+    if hasattr(config, "get"):
+        entity_id_column = config.get("entity_id_column", None)
+    if entity_id_column is None and data_cfg is not None and hasattr(data_cfg, "get"):
+        entity_id_column = data_cfg.get("entity_id_column", None)
+
+    entity_id_modulo = None
+    if hasattr(config, "get"):
+        entity_id_modulo = config.get("entity_id_modulo", None)
+    if entity_id_modulo is None and data_cfg is not None and hasattr(data_cfg, "get"):
+        entity_id_modulo = data_cfg.get("entity_id_modulo", None)
+    if entity_id_modulo is None:
+        entity_id_modulo = 254
+
     return _load_csv_as_flows(
         csv_path=csv_path,
         categorical_columns=list(config.categorical_columns),
         numerical_columns=list(config.numerical_columns),
         label_column=config.label_column,
         entity_id_column=entity_id_column,
-        sublabel_column=config.get("sublabel_column", None),
+        sublabel_column=config.get("sublabel_column", None) if hasattr(config, "get") else None,
         limit=limit,
-        entity_id_modulo=config.data.get("entity_id_modulo", 254),
+        entity_id_modulo=entity_id_modulo,
         stride=stride,
-        schema_columns=list(config.get("columns", [])),
+        schema_columns=list(config.get("columns", [])) if hasattr(config, "get") else [],
     )
+
+
+def load_raw_unsw_nb15(config: Any, data_dir: Path = Path("datasets"), limit: Optional[int] = None, stride: int = 1) -> List[CanonicalFlow]:
+    """Compatibility helper for UNSW-NB15 flow loading in streaming sidecar and demos."""
+    candidates = [
+        Path(data_dir) / "UNSW_NB15_testing-set.csv",
+        Path("datasets") / "UNSW_NB15_testing-set.csv",
+        Path("data/raw") / "UNSW_NB15_testing-set.csv",
+        Path(data_dir) / "UNSW-NB15_1.csv",
+    ]
+    for p in candidates:
+        if p.exists():
+            return load_dataset_flows(config, p.parent, p.name, limit=limit, stride=stride)
+    return load_dataset_flows(config, Path(data_dir), "UNSW_NB15_testing-set.csv", limit=limit, stride=stride)
+

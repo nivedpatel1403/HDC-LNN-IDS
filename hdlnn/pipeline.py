@@ -57,6 +57,12 @@ def main():
         default=None,
         help="Optional run identifier to use instead of the baseline default."
     )
+    parser.add_argument(
+        "--output-table",
+        type=str,
+        default=None,
+        help="Optional destination path for markdown comparison table (defaults to runs/comparison_table.md)."
+    )
     
     args = parser.parse_args()
     
@@ -78,6 +84,7 @@ def main():
     
     runs_dir = Path("runs")
     runs_dir.mkdir(parents=True, exist_ok=True)
+    output_table_file = Path(args.output_table) if args.output_table else runs_dir / "comparison_table.md"
     
     if args.mode == "ablate":
         # Ablate mode: run all baselines sequentially and report comparative stats
@@ -104,7 +111,7 @@ def main():
                 logger.error(f"Failed to execute experiment for baseline '{baseline}': {e}", exc_info=True)
                 
         # Generate and save final summary table
-        print_and_save_comparison_table(runs_dir=runs_dir)
+        print_and_save_comparison_table(runs_dir=runs_dir, output_file=output_table_file)
         
     elif args.mode in ("train", "eval"):
         # Single baseline execution
@@ -123,7 +130,7 @@ def main():
             save_diagnostic_plots(runs_dir / run_id)
             save_diagnostic_plots(runs_dir / run_id, "validation_decisions.csv", "validation_score_diagnostics.png")
             # Re-generate summary table to include this new single run
-            print_and_save_comparison_table(runs_dir=runs_dir)
+            print_and_save_comparison_table(runs_dir=runs_dir, output_file=output_table_file)
         except Exception as e:
             logger.error(f"Failed to execute single experiment for '{args.baseline}': {e}", exc_info=True)
             sys.exit(1)
@@ -131,7 +138,7 @@ def main():
     elif args.mode == "report":
         # Simply compile and print results for all completed runs
         logger.info("Compiling metrics summary reports...")
-        print_and_save_comparison_table(runs_dir=runs_dir)
+        print_and_save_comparison_table(runs_dir=runs_dir, output_file=output_table_file)
         
         # Save plots for all completed runs
         for run_path in runs_dir.iterdir():

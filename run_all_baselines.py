@@ -28,90 +28,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger("run_all_baselines")
 
-BASELINES = ["mamba2", "cnn", "autoencoder", "hdc-lnn", "lstm", "ft-transformer", "saint"]
-
-def find_dataset_files(datasets_dir: Path, target_file: Optional[str] = None, all_datasets: bool = False) -> List[Path]:
-    """Discovers benchmark dataset files in the datasets folder."""
-    if not datasets_dir.exists():
-        logger.error(f"Datasets directory not found: {datasets_dir}")
-        return []
-    
-    if target_file:
-        t_path = Path(target_file) if Path(target_file).exists() else datasets_dir / target_file
-        if t_path.exists():
-            return [t_path]
-        else:
-            logger.error(f"Requested dataset file not found: {target_file}")
-            return []
-
-    if all_datasets:
-        # Discover all CSV files in directory (ignoring metadata schema definition files)
-        return [
-            f for f in sorted(datasets_dir.glob("*.csv")) 
-            if not f.name.endswith("_Names.csv") and not f.name.endswith("_Feature_Names.csv")
-        ]
-
-    # Priority search for primary evaluation datasets across different domains
-    primary_candidates = [
-        "UNSW_NB15_testing-set.csv",
-        "kdd_test.csv",
-        "ton-iot.csv"
-    ]
-    found = [datasets_dir / name for name in primary_candidates if (datasets_dir / name).exists()]
-    
-    if not found:
-        # Fallback to all CSV files in directory (ignoring metadata schema definition files)
-        found = [
-            f for f in sorted(datasets_dir.glob("*.csv")) 
-            if not f.name.endswith("_Names.csv") and not f.name.endswith("_Feature_Names.csv")
-        ]
-        
-    return found
-
-def match_config_for_dataset(dataset_path: Path) -> Path:
-    """Matches appropriate config YAML for the given dataset file."""
-    name_lower = dataset_path.name.lower()
-    if "kdd" in name_lower:
-        cfg = Path("configs/dataset_kdd.yaml")
-        if cfg.exists():
-            return cfg
-    if "ton" in name_lower or ("iot" in name_lower and "botnet" not in name_lower and "unsw" not in name_lower):
-        cfg = Path("configs/dataset_ton_iot.yaml")
-        if cfg.exists():
-            return cfg
-    if "botnet" in name_lower:
-        cfg = Path("configs/dataset_unsw_botnet.yaml")
-        if cfg.exists():
-            return cfg
-    if "dataset" in name_lower and any(c.isdigit() for c in name_lower) and "unsw" not in name_lower:
-        cfg = Path("configs/dataset_iot23.yaml")
-        if cfg.exists():
-            return cfg
-    if "unsw" in name_lower or "nb15" in name_lower:
-        cfg = Path("configs/dataset_unsw_nb15.yaml")
-        if cfg.exists():
-            return cfg
-            
-    # Inspect CSV header if file exists to detect dataset schema dynamically
-    if dataset_path.exists():
-        try:
-            with open(dataset_path, "r", encoding="utf-8", errors="ignore") as f:
-                first_line = f.readline().strip()
-                header = first_line.lower()
-                cols = [c.strip() for c in first_line.split(",")]
-                if "src_bytes" in header and "dst_bytes" in header and "count" in header:
-                    return Path("configs/dataset_kdd.yaml")
-                elif len(cols) in (41, 42, 43) and cols[0].isdigit() and cols[1] in ("tcp", "udp", "icmp"):
-                    # Standard headerless KDD/NSL-KDD CSV format
-                    return Path("configs/dataset_kdd.yaml")
-                elif "ts" in header and "conn_state" in header:
-                    return Path("configs/dataset_ton_iot.yaml")
-                elif "sbytes" in header and "dbytes" in header:
-                    return Path("configs/dataset_unsw_nb15.yaml")
-        except Exception:
-            pass
-            
-    return Path("configs/dataset_unsw_nb15.yaml")
+from hdlnn.common.dataset_utils import BASELINES, find_dataset_files, match_config_for_dataset
 
 def generate_dynamic_architectural_analysis(run_ids: List[str], runs_dir: Path = Path("runs")) -> str:
     """Dynamically synthesizes architectural analysis based strictly on the actual evaluated run metrics."""
@@ -303,7 +220,7 @@ def main():
     parser.add_argument("--all", action="store_true", help="Run benchmark across ALL CSV dataset files found in datasets/ directory.")
     parser.add_argument("--quick", action="store_true", help="Run quick smoke test (capped at 5,000 flows, 1 epoch - SMOKE TEST ONLY).")
     parser.add_argument("--limit", type=int, default=None, help="Explicit limit on number of flows to evaluate (default: 30,000 for full-scale).")
-    parser.add_argument("--output-table", type=str, default="BENCHMARK_COMPARISON.md", help="Destination markdown table file.")
+    parser.add_argument("--output-table", type=str, default="runs/comparison_table.md", help="Destination markdown table file (defaults to runs/comparison_table.md).")
     parser.add_argument("--runs-dir", type=str, default="runs", help="Output directory for run artifacts.")
     args = parser.parse_args()
 
@@ -392,6 +309,7 @@ def main():
         f"{arch_analysis_md}\n"
     )
 
+    output_table_path.parent.mkdir(parents=True, exist_ok=True)
     with open(output_table_path, "w", encoding="utf-8") as f:
         f.write(final_content)
 

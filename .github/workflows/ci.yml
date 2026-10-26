@@ -29,6 +29,10 @@ jobs:
         pip install torch --index-url https://download.pytorch.org/whl/cpu
         pip install -e ".[dev]"
 
+    - name: Verify script compilation
+      run: |
+        python -m py_compile evaluate_encoder_separability.py generate_table.py run_all_baselines.py run_all_datasets.py
+
     - name: Run test suite
       run: |
         pytest -v

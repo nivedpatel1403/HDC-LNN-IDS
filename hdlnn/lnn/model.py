@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 from typing import Tuple, Optional
 from ncps.torch import CfC
+from hdlnn.lnn.cfc_cell import CfCCell
 from hdlnn.contracts.interfaces import ISequenceModel
 
 class LNNSequenceModel(nn.Module, ISequenceModel):
@@ -83,6 +84,8 @@ class LNNSequenceModel(nn.Module, ISequenceModel):
         Returns:
             Tuple[torch.Tensor, torch.Tensor]: Sequence outputs and the final hidden state.
         """
+        if dt is not None:
+            dt = torch.clamp(dt, min=0.0)
         output_seq, h_last = self.cfc(x, hx=h0, timespans=dt)
         return output_seq, h_last
 
@@ -96,7 +99,23 @@ class LNNSequenceModel(nn.Module, ISequenceModel):
         """
         x_2d = x.unsqueeze(0) if x.dim() == 1 else (x.squeeze(1) if x.dim() == 3 else x)
         h_2d = h_prev.unsqueeze(0) if h_prev.dim() == 1 else h_prev
-        dt_flat = dt.view(-1) if dt.dim() > 0 else dt.unsqueeze(0)
+
+        # Defensive handling and 2D broadcasting for timespan: shape [B, 1], dt >= 0.0
+        if not isinstance(dt, torch.Tensor):
+            dt_tensor = torch.tensor([[float(dt)]], dtype=x_2d.dtype, device=x_2d.device)
+        else:
+            dt_tensor = dt
+            
+        if dt_tensor.dim() == 0:
+            dt_2d = dt_tensor.view(1, 1)
+        elif dt_tensor.dim() == 1:
+            dt_2d = dt_tensor.unsqueeze(1)
+        elif dt_tensor.dim() == 2:
+            dt_2d = dt_tensor
+        else:
+            dt_2d = dt_tensor.view(-1, 1)
+
+        dt_2d = torch.clamp(dt_2d, min=0.0)
         
         # Fast fused single-flow path
         if self._fused_W is not None and x_2d.size(0) == 1:
@@ -106,7 +125,7 @@ class LNNSequenceModel(nn.Module, ISequenceModel):
             ff1, ff2, t_a, t_b = torch.split(fused, self.hidden_dim, dim=1)
             ff1 = torch.tanh(ff1)
             ff2 = torch.tanh(ff2)
-            t_interp = torch.sigmoid(t_a * dt_flat + t_b)
+            t_interp = torch.sigmoid(t_a * dt_2d + t_b)
             h_next = ff1 * (1.0 - t_interp) + t_interp * ff2
             if return_instantaneous:
                 return h_next, bb_out
@@ -119,10 +138,10 @@ class LNNSequenceModel(nn.Module, ISequenceModel):
                 bb_out = cell.backbone(x_in)
             else:
                 bb_out = None
-            _, h_next = cell(x_2d, h_2d, dt_flat)
+            _, h_next = cell(x_2d, h_2d, dt_2d)
         else:
             x_seq = x_2d.unsqueeze(1)
-            dt_seq = dt_flat.view(x_2d.size(0), 1)
+            dt_seq = dt_2d.view(x_2d.size(0), 1)
             _, h_next = self.cfc(x_seq, hx=h_2d, timespans=dt_seq)
             bb_out = None
             

@@ -95,10 +95,7 @@ def generate_encoder_separability_table(runs_dir: Path = Path("runs"), dataset_p
         target_csv = dataset_path or "datasets/UNSW_NB15_testing-set.csv"
         if Path(target_csv).exists():
             try:
-                import sys
-                if str(Path.cwd()) not in sys.path:
-                    sys.path.insert(0, str(Path.cwd()))
-                from evaluate_encoder_separability import compute_encoder_separability
+                from hdlnn.common.dataset_utils import compute_encoder_separability
                 results = compute_encoder_separability(dataset_path=target_csv, limit=5000)
             except Exception as e:
                 logger.warning(f"Could not compute live encoder separability on {target_csv}: {e}")
@@ -131,10 +128,13 @@ def generate_encoder_separability_table(runs_dir: Path = Path("runs"), dataset_p
         
     return "\n".join(lines)
 
-def print_and_save_comparison_table(runs_dir: Path = Path("runs"), output_file: Path = Path("BENCHMARK_COMPARISON.md")) -> None:
-    """Generates the comparison table, prints it to the console, and writes it to a file."""
+def print_and_save_comparison_table(
+    runs_dir: Path = Path("runs"),
+    output_file: Optional[Path] = Path("runs/comparison_table.md")
+) -> None:
+    """Generates the comparison table, prints it to the console, and optionally writes it to a file."""
     table_md = generate_comparison_table(runs_dir)
-    enc_table_md = generate_encoder_separability_table()
+    enc_table_md = generate_encoder_separability_table(runs_dir=runs_dir)
     
     print("\n--- BASELINE MODEL COMPARISON TABLE ---")
     print(table_md)
@@ -143,14 +143,18 @@ def print_and_save_comparison_table(runs_dir: Path = Path("runs"), output_file: 
     print(enc_table_md)
     print("---------------------------------------------\n")
     
-    with open(output_file, "w", encoding="utf-8") as f:
-        f.write("# Final Baseline Model Benchmark Comparison\n\n")
-        f.write("> [!NOTE]\n")
-        f.write("> **FULL-SCALE BENCHMARK**: Full-rank normal validation manifold calibration under strict cybersecurity leakage isolation.\n\n")
-        f.write("## 1. Sequence & Generative Model Detection Performance\n\n")
-        f.write(table_md)
-        f.write("\n\n## 2. Encoder Geometric Separability (UNSW-NB15)\n\n")
-        f.write(enc_table_md)
-        f.write("\n\n## 3. Honest Architectural Analysis & Relative Ranking\n\n")
-        f.write("**(Generated from latest run data)**\n")
-    logger.info(f"Markdown comparison table written to {output_file}")
+    if output_file is not None:
+        out_path = Path(output_file)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(out_path, "w", encoding="utf-8") as f:
+            f.write("# Final Baseline Model Benchmark Comparison\n\n")
+            f.write("> [!NOTE]\n")
+            f.write("> **FULL-SCALE BENCHMARK**: Full-rank normal validation manifold calibration under strict cybersecurity leakage isolation.\n\n")
+            f.write("## 1. Sequence & Generative Model Detection Performance\n\n")
+            f.write(table_md)
+            f.write("\n\n## 2. Encoder Geometric Separability (UNSW-NB15)\n\n")
+            f.write(enc_table_md)
+            f.write("\n\n## 3. Honest Architectural Analysis & Relative Ranking\n\n")
+            f.write("**(Generated from latest run data)**\n")
+        logger.info(f"Markdown comparison table written to {out_path}")
+
