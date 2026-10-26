@@ -73,15 +73,33 @@ def compute_detection_metrics(decisions: list[AnomalyDecision]) -> dict[str, Any
     }
 
 
-def compute_latency_stats(latencies_ms: list[float], device: str) -> dict[str, Any]:
-    """Compute per-record inference latency statistics (mean, p95, min, max).
+def compute_latency_stats(
+    latencies_ms: list[float],
+    device: str,
+    warmup_n: int = 0,
+) -> dict[str, Any]:
+    """Compute per-record inference latency statistics with warm-up discard.
+
+    Reports p50, p95, p99, max, mean, and min after discarding the first
+    ``warmup_n`` measurements (JIT compilation / memory-allocation warm-up
+    effects). Throughput (events/sec) is computed from pure inference time
+    (sum of all step latencies including warm-up events, so it reflects
+    sustained throughput over the full replay, not just the measured window).
 
     Args:
-        latencies_ms: List of per-record latency numbers in milliseconds.
+        latencies_ms: List of per-record latency numbers in milliseconds,
+            in event-arrival order.
         device: Device string (e.g. 'cpu', 'cuda:0'). Required argument.
+        warmup_n: Number of leading measurements to discard before computing
+            percentiles / mean. Does NOT affect throughput denominator.
+            Default 0 (no discard). Recommended 10 for streaming benchmarks.
 
     Returns:
-        Dictionary containing latency statistics and attached device string.
+        Dictionary containing latency statistics and attached device string:
+            mean_ms, p50_ms, p95_ms, p99_ms, max_ms, min_ms,
+            throughput_eps (events/sec, full-replay inference time),
+            warmup_n (recorded for provenance),
+            device.
 
     Raises:
         ValueError: If device argument is missing or empty.
@@ -89,21 +107,40 @@ def compute_latency_stats(latencies_ms: list[float], device: str) -> dict[str, A
     if not device or not str(device).strip():
         raise ValueError("Device string is required for latency stats calculation.")
 
+    empty: dict[str, Any] = {
+        "mean_ms": 0.0,
+        "p50_ms": 0.0,
+        "p95_ms": 0.0,
+        "p99_ms": 0.0,
+        "min_ms": 0.0,
+        "max_ms": 0.0,
+        "throughput_eps": 0.0,
+        "warmup_n": warmup_n,
+        "device": str(device).strip(),
+    }
     if not latencies_ms:
-        return {
-            "mean_ms": 0.0,
-            "p95_ms": 0.0,
-            "min_ms": 0.0,
-            "max_ms": 0.0,
-            "device": str(device).strip(),
-        }
+        return empty
 
-    arr = np.array(latencies_ms, dtype=np.float64)
+    all_arr = np.array(latencies_ms, dtype=np.float64)
+
+    # Throughput uses the full replay (all events including warm-up)
+    total_inference_s = float(np.sum(all_arr)) / 1000.0
+    throughput_eps = float(len(all_arr)) / total_inference_s if total_inference_s > 0 else 0.0
+
+    # Percentiles / mean are computed on the post-warm-up window only
+    measured = all_arr[warmup_n:] if warmup_n > 0 and len(all_arr) > warmup_n else all_arr
+    if len(measured) == 0:
+        return {**empty, "throughput_eps": throughput_eps}
+
     return {
-        "mean_ms": float(np.mean(arr)),
-        "p95_ms": float(np.percentile(arr, 95)),
-        "min_ms": float(np.min(arr)),
-        "max_ms": float(np.max(arr)),
+        "mean_ms": float(np.mean(measured)),
+        "p50_ms": float(np.percentile(measured, 50)),
+        "p95_ms": float(np.percentile(measured, 95)),
+        "p99_ms": float(np.percentile(measured, 99)),
+        "min_ms": float(np.min(measured)),
+        "max_ms": float(np.max(measured)),
+        "throughput_eps": throughput_eps,
+        "warmup_n": warmup_n,
         "device": str(device).strip(),
     }
 

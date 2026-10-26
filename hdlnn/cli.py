@@ -76,8 +76,15 @@ def stream_cmd(config: str, run_id: str, replay_rate: float, check_consistency: 
 
     click.echo("✅ Streaming Complete!")
     click.echo(f"   • Run ID: {res.run_id}")
-    click.echo(f"   • Mean Latency: {res.latency_stats.get('mean_ms', 0.0):.2f} ms")
-    click.echo(f"   • P95 Latency: {res.latency_stats.get('p95_ms', 0.0):.2f} ms")
+    click.echo(f"   • Mean Latency:       {res.latency_stats.get('mean_ms', 0.0):.3f} ms")
+    click.echo(f"   • P50 Latency:        {res.latency_stats.get('p50_ms', 0.0):.3f} ms")
+    click.echo(f"   • P95 Latency:        {res.latency_stats.get('p95_ms', 0.0):.3f} ms")
+    click.echo(f"   • P99 Latency:        {res.latency_stats.get('p99_ms', 0.0):.3f} ms")
+    click.echo(f"   • Max Latency:        {res.latency_stats.get('max_ms', 0.0):.3f} ms")
+    click.echo(f"   • Throughput:         {res.latency_stats.get('throughput_eps', 0.0):.1f} events/sec")
+    click.echo(f"   • Peak RSS:           {res.memory_stats.get('peak_rss_mb', 0.0):.1f} MB")
+    click.echo(f"   • Device:             {res.latency_stats.get('device', 'cpu')}")
+    click.echo(f"   • Warm-up N:          {res.latency_stats.get('warmup_n', 0)} events discarded")
     click.echo(f"   • Artifacts saved under: runs/{res.run_id}/")
 
 

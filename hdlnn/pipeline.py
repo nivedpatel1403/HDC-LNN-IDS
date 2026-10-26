@@ -272,8 +272,11 @@ def run_stream(
         logger.info("Eval-vs-stream consistency verification PASSED: 100%% decision agreement!")
 
     # Assemble RunResult without retraining sequence model
+    # Discard first WARMUP_N events from latency percentiles (JIT/alloc warm-up).
+    # Throughput denominator is still the full event set (sustained, not burst).
+    _STREAM_WARMUP_N = 10
     detection_metrics = compute_detection_metrics(stream_decisions)
-    latency_stats = compute_latency_stats(latencies_ms, device=config.device)
+    latency_stats = compute_latency_stats(latencies_ms, device=config.device, warmup_n=_STREAM_WARMUP_N)
     memory_stats = compute_memory_stats(pipeline.sequence_model, device=config.device)
     commit_hash = get_git_commit_hash()
 
