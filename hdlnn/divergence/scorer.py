@@ -1,106 +1,166 @@
-"""Divergence scorer for anomaly detection using calibrated Mahalanobis drift thresholds."""
-
-from pathlib import Path
 import numpy as np
 import torch
-
-from hdlnn.contracts.decision import AnomalyDecision
-from hdlnn.contracts.errors import ManifoldFitError
-from hdlnn.contracts.trajectory import TrajectoryState
-from hdlnn.divergence.interfaces import IDivergenceScorer
+import logging
+from typing import Dict, Optional, Tuple, Any
+from hdlnn.contracts.interfaces import IDivergenceScorer
+from hdlnn.contracts.schemas import TrajectoryState, AnomalyDecision
 from hdlnn.divergence.manifold import ReferenceManifold
 
+logger = logging.getLogger(__name__)
 
 class DivergenceScorer(IDivergenceScorer):
-    """Divergence scorer calculating Mahalanobis drift against a reference manifold.
-
-    Calibrates decision threshold to a target False Positive Rate (FPR) on normal trajectories.
-    """
-
+    """Computes behavioral drift anomalies using either Mahalanobis or Cosine EWMA modes."""
+    
     def __init__(
         self,
-        target_fpr: float = 0.05,
-        manifold_version: str = "manifold_v1_normal_val_only",
-        sample_ratio_threshold: float = 5.0,
-    ) -> None:
-        self.target_fpr = target_fpr
-        self.manifold_version = manifold_version
-        self.sample_ratio_threshold = sample_ratio_threshold
+        mode: str = "mahalanobis",
+        threshold_k: float = 3.0,
+        alpha: float = 0.05,
+        hidden_dim: int = 64,
+        warmup_steps: int = 0,
+        model: Optional[Any] = None
+    ):
+        self.mode = mode.lower()
+        self.threshold_k = threshold_k
+        self.alpha = alpha
+        self.hidden_dim = hidden_dim
+        self.warmup_steps = warmup_steps
+        self.model = model
+        self.initial_threshold = 1.0
+        
+        # Mahalanobis components
+        self.manifold = ReferenceManifold(hidden_dim=hidden_dim)
+        self.mahalanobis_threshold = 0.0
 
-        self.manifold = ReferenceManifold(
-            version=self.manifold_version,
-            sample_ratio_threshold=self.sample_ratio_threshold,
+        # Cosine EWMA tracking per entity: entity_id -> (mean, var, count)
+        self.ewma_stats: Dict[str, Tuple[float, float, int]] = {}
+        # Stores the current observed hypervector: entity_id -> torch.Tensor
+        self.last_observed: Dict[str, torch.Tensor] = {}
+
+    def register_observed(self, entity_id: str, vector: torch.Tensor) -> None:
+        """Registers the actual observed hypervector for a given entity, required for Cosine mode."""
+        self.last_observed[entity_id] = vector
+
+    def fit_mahalanobis_threshold(self, normal_states: torch.Tensor) -> None:
+        """Fits the ReferenceManifold and computes the static Mahalanobis threshold on normal validation data."""
+        if self.mode != "mahalanobis":
+            return
+            
+        # Fit the manifold
+        self.manifold.fit(normal_states)
+        
+        # Calculate distances of the fitting normal states to set the threshold
+        distances = self.manifold.compute_mahalanobis_distance(normal_states)
+        mean_dist = float(distances.mean())
+        std_dist = float(distances.std())
+        
+        # Static threshold: mean + k * std
+        self.mahalanobis_threshold = mean_dist + self.threshold_k * std_dist
+        logger.info(
+            f"Mahalanobis threshold fit: mean={mean_dist:.4f}, std={std_dist:.4f}, "
+            f"k={self.threshold_k}, final_threshold={self.mahalanobis_threshold:.4f}"
         )
 
-        self.threshold: float = 0.0
-        self.is_fitted = False
+    def fit_f1_max_threshold(self, normal_states: torch.Tensor, val_states: torch.Tensor, val_labels: np.ndarray) -> float:
+        """Fits ReferenceManifold on normal states and calibrates F1-maximizing threshold on validation split."""
+        if self.mode != "mahalanobis":
+            return self.mahalanobis_threshold
+            
+        # Fit the manifold
+        self.manifold.fit(normal_states)
+        
+        # Score validation states
+        val_dists = self.manifold.compute_mahalanobis_distance(val_states).detach().cpu().numpy()
 
-    def fit(self, normal_trajectories: list[TrajectoryState], labels: list[str]) -> None:
-        """Fit reference manifold and calibrate decision threshold to target FPR.
+        from hdlnn.eval.calibration import calibrate_threshold
+        best_th, summary = calibrate_threshold(val_labels, val_dists, method="f1_max")
+        self.mahalanobis_threshold = best_th
+        logger.info("Validation F1-Max Mahalanobis threshold calibrated: threshold=%.4f, val_f1=%.4f",
+                    best_th, summary["selected"]["f1"])
+        return best_th
 
-        Args:
-            normal_trajectories: List of normal TrajectoryState objects.
-            labels: List of ground-truth labels (must all be 'normal').
+    def score(self, state: TrajectoryState) -> AnomalyDecision:
+        """Computes behavioral drift against reference manifold or LNN next-state predictions."""
+        if self.mode == "mahalanobis":
+            return self._score_mahalanobis(state)
+        elif self.mode == "cosine":
+            return self._score_cosine_ewma(state)
+        else:
+            raise ValueError(f"Unsupported scoring mode: {self.mode}")
 
-        Raises:
-            ManifoldFitError: If fitting fails or any label is non-normal.
-        """
-        # 1. Fit ReferenceManifold (enforces normal-only rule)
-        self.manifold.fit(normal_trajectories, labels)
-
-        # 2. Score normal training trajectories to calibrate threshold
-        drift_scores: list[float] = []
-        for traj in normal_trajectories:
-            arr = np.load(traj.hidden_state_ref)
-            hidden_tensor = torch.from_numpy(arr).float()
-            score_val = self.manifold.mahalanobis_distance(hidden_tensor)
-            drift_scores.append(score_val)
-
-        # 3. Calibrate threshold as (1 - target_fpr) percentile of normal scores (ADR-003)
-        pct = (1.0 - self.target_fpr) * 100.0
-        self.threshold = float(np.percentile(drift_scores, pct))
-        self.is_fitted = True
-
-    def score(
-        self,
-        trajectory: TrajectoryState,
-        ground_truth_label: str | None = None,
-        attack_category: str | None = None,
-    ) -> AnomalyDecision:
-        """Score a single TrajectoryState and return an AnomalyDecision.
-
-        Args:
-            trajectory: TrajectoryState object.
-            ground_truth_label: Optional label string.
-            attack_category: Optional attack category string.
-
-        Returns:
-            Populated AnomalyDecision contract object.
-
-        Raises:
-            ManifoldFitError: If score is called before fit.
-        """
-        if not self.is_fitted:
-            raise ManifoldFitError("DivergenceScorer must be fit before calling score().")
-
-        path = Path(trajectory.hidden_state_ref)
-        if not path.exists():
-            raise ManifoldFitError(f"Trajectory hidden state file not found at '{path}'")
-
-        arr = np.load(path)
-        hidden_tensor = torch.from_numpy(arr).float()
-
-        drift_score = self.manifold.mahalanobis_distance(hidden_tensor)
-        is_anomalous = bool(drift_score > self.threshold)
-
+    def _score_mahalanobis(self, state: TrajectoryState) -> AnomalyDecision:
+        # Calculate Mahalanobis distance
+        # state.state is of shape [hidden_dim]
+        dist_tensor = self.manifold.compute_mahalanobis_distance(state.state)
+        drift_score = float(dist_tensor.item())
+        
+        is_anomaly = drift_score >= self.mahalanobis_threshold
+        
         return AnomalyDecision(
-            entity_id=trajectory.entity_id,
-            flow_id=trajectory.flow_id,
-            t=trajectory.t,
             drift_score=drift_score,
-            threshold=self.threshold,
-            is_anomalous=is_anomalous,
-            manifold_version=self.manifold.version,
-            ground_truth_label=ground_truth_label or "unknown",
-            attack_category=attack_category,
+            threshold=self.mahalanobis_threshold,
+            is_anomaly=is_anomaly,
+            scoring_mode="mahalanobis"
+        )
+
+    def _score_cosine_ewma(self, state: TrajectoryState) -> AnomalyDecision:
+        if self.model is None:
+            raise ValueError("LNN Sequence Model must be supplied to DivergenceScorer for Cosine mode.")
+            
+        entity_id = state.entity_id
+        if entity_id not in self.last_observed:
+            # Fallback if no observed hypervector is registered yet
+            return AnomalyDecision(
+                drift_score=0.0,
+                threshold=1.0,
+                is_anomaly=False,
+                scoring_mode="cosine"
+            )
+            
+        observed_hv = self.last_observed[entity_id]
+        
+        # 1. Project LNN state back to hypervector space
+        self.model.eval()
+        with torch.no_grad():
+            predicted_hv = self.model.predict_next_vector(state.state.unsqueeze(0)).squeeze(0)
+            
+        # 2. Compute Cosine Distance: 1 - CosineSimilarity
+        similarity = torch.cosine_similarity(observed_hv.unsqueeze(0), predicted_hv.unsqueeze(0))
+        cosine_dist = float(1.0 - similarity.item())
+
+        # 3. Update adaptive EWMA threshold
+        stats = self.ewma_stats.get(entity_id, (0.0, 0.0, 0))
+        mean_ewma, var_ewma, count = stats
+        count += 1
+        
+        if count == 1:
+            # Initialize statistics
+            mean_ewma = cosine_dist
+            var_ewma = 0.0
+            threshold = self.initial_threshold
+            is_anomaly = (cosine_dist > threshold) if (self.warmup_steps == 0 and threshold < 1.0) else False
+        else:
+            diff = cosine_dist - mean_ewma
+            # Update mean EWMA
+            mean_ewma = mean_ewma + self.alpha * diff
+            # Update variance EWMA
+            var_ewma = (1 - self.alpha) * (var_ewma + self.alpha * (diff ** 2))
+            
+            std_ewma = (var_ewma ** 0.5)
+            threshold = mean_ewma + self.threshold_k * std_ewma
+            
+            # Anomaly verdict (suppressed during warmup period)
+            if count <= self.warmup_steps:
+                is_anomaly = False
+            else:
+                is_anomaly = cosine_dist > threshold
+
+        # Save stats
+        self.ewma_stats[entity_id] = (mean_ewma, var_ewma, count)
+        
+        return AnomalyDecision(
+            drift_score=cosine_dist,
+            threshold=threshold,
+            is_anomaly=is_anomaly,
+            scoring_mode="cosine"
         )
