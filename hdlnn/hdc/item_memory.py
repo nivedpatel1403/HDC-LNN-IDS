@@ -1,132 +1,97 @@
-"""Item memory module for managing HDC base and OOV hypervectors."""
-
-from pathlib import Path
-from typing import Any
 import torch
-import torchhd
+import logging
+from typing import Dict, Tuple, Set, List
 
-from hdlnn.contracts.errors import ItemMemoryError
-from hdlnn.contracts.flow import CanonicalFlow
-
+logger = logging.getLogger(__name__)
 
 class ItemMemory:
-    """Stores and manages base hypervectors for categorical feature values.
-
-    Enforces P4 data isolation: fitting is strictly prohibited on non-train splits.
+    """Stores basis hypervectors for categorical tokens.
+    
+    Optimized for fast batch retrieval via tensor indexing after locking.
     """
+    def __init__(self, D: int = 10000):
+        self.D = D
+        self.locked = False
+        # Mapping: categorical_column -> token_value -> token_id (int)
+        self.vocab_ids: Dict[str, Dict[str, int]] = {}
+        # List of tensors to be stacked at lock time: categorical_column -> List[torch.Tensor]
+        # Index 0 is always reserved for OOV
+        self.vocab_vectors_list: Dict[str, List[torch.Tensor]] = {}
+        # Stacked 2D tensor of shape [vocab_size, D]: categorical_column -> torch.Tensor
+        self.vocab_tensors: Dict[str, torch.Tensor] = {}
 
-    def __init__(
-        self,
-        dim: int = 10000,
-        representation: str = "MAP",
-        encoder_version: str = "hdc_v1",
-    ) -> None:
-        self.dim = dim
-        self.representation = representation.upper()
-        self.encoder_version = encoder_version
-        self.memory: dict[tuple[str, str], torch.Tensor] = {}
-        self.oov_memory: dict[str, torch.Tensor] = {}
-        self.is_fitted = False
+    def lock(self) -> None:
+        """Locks vocabulary and compiles lists of hypervectors into 2D tensors for fast lookup."""
+        self.locked = True
+        for col in self.vocab_ids:
+            vectors = self.vocab_vectors_list[col]
+            self.vocab_tensors[col] = torch.stack(vectors)
+        logger.info("Item Memory locked. Vocab compiled into 2D tensors for optimized batch processing.")
 
-    def fit(self, train_flows: list[CanonicalFlow]) -> None:
-        """Fit ItemMemory by building base hypervectors for categorical features in train split.
+    def unlock(self) -> None:
+        """Unlocks item memory for dynamic training registration."""
+        self.locked = False
+        self.vocab_tensors = {}
+        logger.info("Item Memory unlocked. Ready for token registration.")
 
-        Args:
-            train_flows: List of CanonicalFlow objects.
-
-        Raises:
-            ItemMemoryError: If any flow in train_flows has split != 'train'.
+    def get_vector(self, key: str, value: str) -> Tuple[torch.Tensor, bool]:
+        """Retrieves the hypervector for a single key-value pair.
+        
+        Compatible with single-flow processing, but slow for batch processing.
         """
-        for flow in train_flows:
-            if flow.split != "train":
-                raise ItemMemoryError(
-                    f"ItemMemory.fit() requires all flows to have split='train'. "
-                    f"Found flow_id '{flow.flow_id}' with split='{flow.split}' (P4 violation)."
-                )
+        # Ensure category structures exist
+        if key not in self.vocab_ids:
+            self.vocab_ids[key] = {"<OOV>": 0}
+            self.vocab_vectors_list[key] = [self._random_bipolar_vector()]
+            if self.locked:
+                self.vocab_tensors[key] = torch.stack(self.vocab_vectors_list[key])
 
-        # Gather all unique categorical (feature_name, value) pairs and feature names
-        feature_values: dict[str, set[str]] = {}
-        for flow in train_flows:
-            for feat_name, val in flow.categorical_features.items():
-                feature_values.setdefault(feat_name, set()).add(str(val))
+        vocab_col = self.vocab_ids[key]
+        if value in vocab_col:
+            idx = vocab_col[value]
+            is_oov = (idx == 0)
+            if self.locked:
+                return self.vocab_tensors[key][idx], is_oov
+            else:
+                return self.vocab_vectors_list[key][idx], is_oov
+        
+        if self.locked:
+            # OOV case
+            return self.vocab_tensors[key][0], True
+        else:
+            # Register new token
+            new_vector = self._random_bipolar_vector()
+            idx = len(vocab_col)
+            vocab_col[value] = idx
+            self.vocab_vectors_list[key].append(new_vector)
+            return new_vector, False
 
-        # Generate base hypervectors using torchhd random MAP hypervectors
-        for feat_name, values in feature_values.items():
-            # Reserve unique OOV hypervector per feature
-            if feat_name not in self.oov_memory:
-                self.oov_memory[feat_name] = torchhd.random(1, self.dim, vsa="MAP")[0]
+    def get_batch_vectors(self, key: str, values: List[str]) -> Tuple[torch.Tensor, List[bool]]:
+        """Optimized batch lookup returning a 2D tensor of shape [batch_size, D] and OOV flags."""
+        if key not in self.vocab_ids:
+            # Initialize empty category
+            self.vocab_ids[key] = {"<OOV>": 0}
+            self.vocab_vectors_list[key] = [self._random_bipolar_vector()]
+            if self.locked:
+                self.vocab_tensors[key] = torch.stack(self.vocab_vectors_list[key])
 
-            for val in values:
-                key = (feat_name, val)
-                if key not in self.memory:
-                    self.memory[key] = torchhd.random(1, self.dim, vsa="MAP")[0]
+        vocab_col = self.vocab_ids[key]
+        
+        # Fast list comprehension mapping tokens to integer IDs (defaulting to 0 for OOV)
+        indices = [vocab_col.get(val, 0) for val in values]
+        is_oov = [idx == 0 for idx in indices]
+        
+        indices_tensor = torch.tensor(indices, dtype=torch.long)
+        
+        if self.locked:
+            val_tensor = self.vocab_tensors[key][indices_tensor]
+        else:
+            # Temporary fallback if called before locking
+            tensors_list = self.vocab_vectors_list[key]
+            val_tensor = torch.stack([tensors_list[idx] for idx in indices])
+        
+        return val_tensor, is_oov
 
-        self.is_fitted = True
-
-    def lookup(self, feature_name: str, value: str) -> tuple[torch.Tensor, bool]:
-        """Lookup base hypervector for a given feature and value.
-
-        Args:
-            feature_name: Categorical feature name.
-            value: Feature value string.
-
-        Returns:
-            Tuple of (hypervector_tensor, is_oov_bool).
-        """
-        key = (feature_name, str(value))
-        if key in self.memory:
-            return self.memory[key], False
-
-        # OOV hit: return feature-specific OOV hypervector if available, else generate fallback
-        if feature_name in self.oov_memory:
-            return self.oov_memory[feature_name], True
-
-        # Handle unseen feature name gracefully with on-the-fly reserved OOV vector
-        new_oov = torchhd.random(1, self.dim, vsa="MAP")[0]
-        self.oov_memory[feature_name] = new_oov
-        return new_oov, True
-
-    def save(self, path: str) -> None:
-        """Serialize item memory state to file path."""
-        target_path = Path(path)
-        target_path.parent.mkdir(parents=True, exist_ok=True)
-
-        payload = {
-            "dim": self.dim,
-            "representation": self.representation,
-            "encoder_version": self.encoder_version,
-            "memory": self.memory,
-            "oov_memory": self.oov_memory,
-            "is_fitted": self.is_fitted,
-        }
-        torch.save(payload, target_path)
-
-    @classmethod
-    def load(cls, path: str) -> "ItemMemory":
-        """Deserialize item memory state from file path.
-
-        Raises:
-            ItemMemoryError: If file is missing, corrupted, or invalid.
-        """
-        target_path = Path(path)
-        if not target_path.exists():
-            raise ItemMemoryError(f"Item memory file not found: '{path}'")
-
-        try:
-            payload = torch.load(target_path, weights_only=False)
-            if not isinstance(payload, dict) or "memory" not in payload:
-                raise ItemMemoryError(f"Corrupted or invalid item memory file at '{path}'")
-
-            item_mem = cls(
-                dim=payload.get("dim", 10000),
-                representation=payload.get("representation", "MAP"),
-                encoder_version=payload.get("encoder_version", "hdc_v1"),
-            )
-            item_mem.memory = payload["memory"]
-            item_mem.oov_memory = payload.get("oov_memory", {})
-            item_mem.is_fitted = payload.get("is_fitted", True)
-            return item_mem
-        except Exception as e:
-            if isinstance(e, ItemMemoryError):
-                raise
-            raise ItemMemoryError(f"Failed to load item memory from '{path}': {e}") from e
+    def _random_bipolar_vector(self) -> torch.Tensor:
+        """Generate a random bipolar vector without requiring torchhd."""
+        return torch.randint(0, 2, (self.D,), dtype=torch.int8).float() * 2.0 - 1.0

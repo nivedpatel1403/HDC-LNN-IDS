@@ -1,189 +1,151 @@
-"""Hyperdimensional Computing (HDC) encoder implementing feature binding and bundling."""
-
-from pathlib import Path
-import numpy as np
 import torch
-import torchhd
-
-from hdlnn.contracts.encoded import EncodedHypervector
-from hdlnn.contracts.errors import ConfigError, ItemMemoryError
-from hdlnn.contracts.flow import CanonicalFlow
-from hdlnn.hdc.interfaces import IEncoder
+import logging
+from typing import List, Dict, Any
+from hdlnn.contracts.interfaces import IEncoder
+from hdlnn.contracts.schemas import CanonicalFlow, EncodedHypervector
+from hdlnn.hdc.codebooks import CodebookManager
 from hdlnn.hdc.item_memory import ItemMemory
 
+logger = logging.getLogger(__name__)
 
-class HDCEncoder(IEncoder):
-    """HDC Encoder binding categorical/numeric features and bundling into hypervectors.
-
-    Rejects binary representation per ADR-001 (MAP representation supported).
-    Saves encoded hypervectors to disk as .npy files per ADR-005.
-    """
-
+class RecordEncoder(IEncoder):
+    """Encodes a CanonicalFlow event record into a fixed-width bipolar hypervector."""
+    
     def __init__(
-        self,
-        dim: int = 10000,
-        representation: str = "MAP",
-        num_levels: int = 100,
-        encoder_version: str | None = None,
-    ) -> None:
-        self.dim = dim
-        self.representation = representation
+        self, 
+        D: int = 10000, 
+        categorical_columns: List[str] = None, 
+        numerical_columns: List[str] = None,
+        use_log_transform: bool = False
+    ):
+        self.D = D
+        self.categorical_columns = categorical_columns or []
+        self.numerical_columns = numerical_columns or []
+        self.use_log_transform = use_log_transform
+        
+        self.codebooks = CodebookManager(D=D)
+        self.item_memory = ItemMemory(D=D)
 
-        # Binary HDC is explicitly rejected by ADR-001
-        if representation.lower() == "binary":
-            raise ConfigError("Binary representation is explicitly rejected per ADR-001.")
-
-        if representation.upper() not in ("MAP", "BIPOLAR"):
-            raise ConfigError(
-                f"Unsupported HDC representation '{representation}'. Only 'MAP' and 'bipolar' are supported."
-            )
-
-        self.num_levels = num_levels
-        self.encoder_version = (
-            encoder_version or f"hdc_v1_D{self.dim}_{self.representation.lower()}"
-        )
-
-        self.item_memory = ItemMemory(
-            dim=self.dim,
-            representation=self.representation,
-            encoder_version=self.encoder_version,
-        )
-
-        self.role_vectors: dict[str, torch.Tensor] = {}
-        self.level_vectors: dict[str, torch.Tensor] = {}
-        self.numeric_ranges: dict[str, tuple[float, float]] = {}
-        self.is_fitted = False
-
-    def fit(self, train_flows: list[CanonicalFlow]) -> None:
-        """Fit item memory and numeric level hypervectors using train split flows only.
-
-        Args:
-            train_flows: List of CanonicalFlow objects from the training split.
-
-        Raises:
-            ItemMemoryError: If any flow has split != 'train'.
-        """
+    def fit(self, train_flows: List[CanonicalFlow]) -> None:
+        """Fits numerical ranges and builds item memory vocabulary from training data only."""
+        # 1. Fit numerical min-max scales
+        self.codebooks.fit_numerical_ranges(train_flows, self.numerical_columns, use_log_transform=self.use_log_transform)
+        
+        # 2. Build item memory from training categoricals
+        self.item_memory.unlock()
         for flow in train_flows:
-            if flow.split != "train":
-                raise ItemMemoryError(
-                    f"HDCEncoder.fit() requires all flows to have split='train'. "
-                    f"Found flow '{flow.flow_id}' with split='{flow.split}' (P4 violation)."
-                )
-
-        # 1. Fit ItemMemory for categorical features
-        self.item_memory.fit(train_flows)
-
-        # 2. Gather all feature names for role vector generation
-        all_feature_names: set[str] = set()
-        numeric_values: dict[str, list[float]] = {}
-
-        for flow in train_flows:
-            for cat_name in flow.categorical_features.keys():
-                all_feature_names.add(cat_name)
-
-            for num_name, val in flow.numeric_features.items():
-                all_feature_names.add(num_name)
-                numeric_values.setdefault(num_name, []).append(val)
-
-        # Generate role hypervectors for all features (deterministic via fixed seed if needed)
-        for feat_name in all_feature_names:
-            if feat_name not in self.role_vectors:
-                self.role_vectors[feat_name] = torchhd.random(1, self.dim, vsa="MAP")[0]
-
-        # 3. Generate level hypervectors for numeric features
-        for num_name, vals in numeric_values.items():
-            if vals:
-                min_v = float(min(vals))
-                max_v = float(max(vals))
-            else:
-                min_v, max_v = 0.0, 1.0
-
-            self.numeric_ranges[num_name] = (min_v, max_v)
-            self.level_vectors[num_name] = torchhd.level(self.num_levels, self.dim, vsa="MAP")
-
-        self.is_fitted = True
+            for col in self.categorical_columns:
+                val = flow.categorical_fields.get(col, "-")
+                self.item_memory.get_vector(col, val)
+        
+        # Lock item memory to prevent future leakage
+        self.item_memory.lock()
 
     def encode(self, flow: CanonicalFlow) -> EncodedHypervector:
-        """Encode a single CanonicalFlow into an EncodedHypervector contract.
+        """Transforms a CanonicalFlow into a fixed D-dimensional bipolar hypervector."""
+        return self.encode_batch([flow])[0]
 
-        Stateless per record: all state comes from fitted ItemMemory and level hypervectors.
+    def encode_batch(self, flows: List[CanonicalFlow]) -> List[EncodedHypervector]:
+        """Vectorized encoding of a batch of CanonicalFlow events into hypervectors."""
+        num_flows = len(flows)
+        if num_flows == 0:
+            return []
 
-        Args:
-            flow: CanonicalFlow object.
+        summed = torch.zeros((num_flows, self.D), dtype=torch.float32)
+        any_oov = [False] * num_flows
 
-        Returns:
-            EncodedHypervector contract model.
-        """
-        if not self.is_fitted:
-            raise ItemMemoryError("HDCEncoder must be fit before calling encode().")
+        # 1. Process categorical fields (vectorized lookup via ItemMemory)
+        for col in self.categorical_columns:
+            key_vector = self.codebooks.get_key_vector(col)
+            col_vals = [flow.categorical_fields.get(col, "-") for flow in flows]
+            val_tensor, is_oov_list = self.item_memory.get_batch_vectors(col, col_vals)
+            
+            for i, is_oov in enumerate(is_oov_list):
+                if is_oov:
+                    any_oov[i] = True
+            
+            # Bind key_vector (broadcasts from [D] to [num_flows, D]) in-place to avoid intermediate allocation
+            summed.addcmul_(val_tensor, key_vector.unsqueeze(0))
 
-        bound_vectors: list[torch.Tensor] = []
-        oov_fields: list[str] = []
-
-        # 1. Process Categorical Features
-        for feat_name, val in flow.categorical_features.items():
-            base_hv, is_oov = self.item_memory.lookup(feat_name, val)
-            if is_oov:
-                oov_fields.append(feat_name)
-
-            role_hv = self.role_vectors.get(
-                feat_name, torchhd.random(1, self.dim, vsa="MAP")[0]
-            )
-            bound = torchhd.bind(base_hv, role_hv)
-            bound_vectors.append(bound)
-
-        # 2. Process Numeric Features (Clip min/max, Quantize to level hypervectors)
-        for feat_name, val in flow.numeric_features.items():
-            if feat_name in self.numeric_ranges:
-                min_v, max_v = self.numeric_ranges[feat_name]
+        # 2. Process numerical fields (fully vectorized lookup via level index mapping)
+        use_log = getattr(self.codebooks, "use_log_transform", False)
+        for col in self.numerical_columns:
+            key_vector = self.codebooks.get_key_vector(col)
+            
+            # Gather all values for the batch
+            raw_vals = [flow.numerical_fields.get(col, 0.0) for flow in flows]
+            vals_tensor = torch.tensor(raw_vals, dtype=torch.float32)
+            if use_log:
+                vals_tensor = torch.log1p(torch.clamp(vals_tensor, min=0.0))
+            
+            # Normalize based on training range
+            min_val, max_val = self.codebooks.min_max.get(col, (0.0, 1.0))
+            if max_val == min_val:
+                norm_vals = torch.zeros_like(vals_tensor)
             else:
-                min_v, max_v = 0.0, 1.0
-                self.numeric_ranges[feat_name] = (min_v, max_v)
-                self.level_vectors[feat_name] = torchhd.level(self.num_levels, self.dim, vsa="MAP")
+                norm_vals = (vals_tensor - min_val) / (max_val - min_val)
+            norm_vals = torch.clamp(norm_vals, 0.0, 1.0)
+            
+            # Find level indices
+            level_indices = torch.round(norm_vals * (self.codebooks.num_levels - 1)).long()
+            # Index directly into level_vectors [num_flows, D]
+            val_tensor = self.codebooks.level_vectors[level_indices]
+            
+            # Bind with key vector in-place
+            summed.addcmul_(val_tensor, key_vector.unsqueeze(0))
 
-            # Out-of-range numeric values clip to min/max bin edges (not OOV)
-            clipped_val = max(min_v, min(max_v, float(val)))
+        # 3. Apply thresholding / majority rule sign operation
+        bipolar_vectors = torch.sign(summed)
+        bipolar_vectors[bipolar_vectors == 0] = 1.0
 
-            if math_isclose(max_v, min_v):
-                bin_idx = 0
-            else:
-                bin_idx = int((clipped_val - min_v) / (max_v - min_v) * (self.num_levels - 1))
-                bin_idx = max(0, min(self.num_levels - 1, bin_idx))
+        return [
+            EncodedHypervector(vector=bipolar_vectors[i], is_oov=any_oov[i])
+            for i in range(num_flows)
+        ]
 
-            level_hv = self.level_vectors[feat_name][bin_idx]
-            role_hv = self.role_vectors.get(
-                feat_name, torchhd.random(1, self.dim, vsa="MAP")[0]
-            )
-            bound = torchhd.bind(level_hv, role_hv)
-            bound_vectors.append(bound)
+    def encode_tensor(self, flows: List[CanonicalFlow]) -> torch.Tensor:
+        """Vectorized direct encoding of a batch of CanonicalFlow events returning a single dense Tensor."""
+        num_flows = len(flows)
+        if num_flows == 0:
+            return torch.zeros((0, self.D), dtype=torch.float32)
 
-        # 3. Bundle (Multibundle) all per-feature hypervectors
-        if bound_vectors:
-            stacked = torch.stack(bound_vectors)
-            bundled_hv = torchhd.multibundle(stacked)
-        else:
-            bundled_hv = torch.zeros(self.dim)
+        import numpy as np
+        summed = torch.zeros((num_flows, self.D), dtype=torch.float32)
+        use_log = getattr(self.codebooks, "use_log_transform", False)
 
-        # 4. Save numpy array to disk per ADR-005 (.npy format)
-        out_dir = Path("data/encoded") / self.encoder_version
-        out_dir.mkdir(parents=True, exist_ok=True)
-        out_path = out_dir / f"{flow.flow_id}.npy"
+        for col in self.categorical_columns:
+            key_vector = self.codebooks.get_key_vector(col)
+            col_vals = [flow.categorical_fields.get(col, "-") for flow in flows]
+            val_tensor, _ = self.item_memory.get_batch_vectors(col, col_vals)
+            summed.addcmul_(val_tensor, key_vector.unsqueeze(0))
 
-        np_arr = bundled_hv.detach().cpu().numpy()
-        np.save(out_path, np_arr)
+        num_cols = self.numerical_columns
+        if num_cols:
+            mins = np.array([self.codebooks.min_max.get(col, (0.0, 1.0))[0] for col in num_cols], dtype=np.float32)
+            maxs = np.array([self.codebooks.min_max.get(col, (0.0, 1.0))[1] for col in num_cols], dtype=np.float32)
+            diffs = maxs - mins
+            is_zero_diff = (diffs == 0)
+            diffs[is_zero_diff] = 1.0
 
-        representation_str = "MAP" if self.representation.upper() == "MAP" else "bipolar"
+            num_matrix = np.empty((num_flows, len(num_cols)), dtype=np.float32)
+            for j, col in enumerate(num_cols):
+                num_matrix[:, j] = [flow.numerical_fields.get(col, 0.0) for flow in flows]
 
-        return EncodedHypervector(
-            flow_id=flow.flow_id,
-            encoder_version=self.encoder_version,
-            dim=self.dim,
-            representation=representation_str,
-            vector_ref=str(out_path),
-            oov_fields=oov_fields,
-        )
+            if use_log:
+                np.maximum(num_matrix, 0.0, out=num_matrix)
+                np.log1p(num_matrix, out=num_matrix)
 
+            norm_matrix = (num_matrix - mins) / diffs
+            norm_matrix[:, is_zero_diff] = 0.0
+            np.clip(norm_matrix, 0.0, 1.0, out=norm_matrix)
+            idx_matrix = np.round(norm_matrix * (self.codebooks.num_levels - 1)).astype(np.int64)
+            idx_torch = torch.from_numpy(idx_matrix)
 
-def math_isclose(a: float, b: float, rel_tol: float = 1e-9) -> bool:
-    """Helper for floating point equality check."""
-    return abs(a - b) <= rel_tol
+            for j, col in enumerate(num_cols):
+                key_vector = self.codebooks.get_key_vector(col)
+                val_tensor = self.codebooks.level_vectors[idx_torch[:, j]]
+                summed.addcmul_(val_tensor, key_vector.unsqueeze(0))
+
+        bipolar_vectors = torch.sign(summed)
+        bipolar_vectors[bipolar_vectors == 0] = 1.0
+        return bipolar_vectors.to(torch.int8)
