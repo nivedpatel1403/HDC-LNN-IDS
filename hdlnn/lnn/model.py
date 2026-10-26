@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 from typing import Tuple, Optional
+import hdlnn.lnn.cfc_cell
 from ncps.torch import CfC
 from hdlnn.contracts.interfaces import ISequenceModel
 

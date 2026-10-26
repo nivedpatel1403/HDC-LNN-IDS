@@ -1,6 +1,6 @@
 import yaml
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Literal
 
 class Config:
     """Configuration class that loads settings from YAML files."""
@@ -40,3 +40,41 @@ def _deep_update(base: Dict[str, Any], overrides: Dict[str, Any]) -> None:
             _deep_update(base[k], v)
         else:
             base[k] = v
+
+
+# Backward compatibility aliases for legacy scripts and test harnesses
+try:
+    import os
+    from pydantic_settings import BaseSettings, SettingsConfigDict
+
+    class Settings(BaseSettings):
+        run_id: str = "base_run_001"
+        seed: int = 42
+        log_level: str = "INFO"
+        dataset_source: str = "unsw"
+        dataset_raw_path: Optional[str] = None
+        split_version: str = "v1"
+        hdc_encoder: Literal["on", "off"] = "on"
+        lnn_stage: Literal["on", "off"] = "on"
+        sequence_model_type: Literal["cfc", "ltc", "lstm", "cnn"] = "cfc"
+        epochs: int = 5
+        lr: float = 1e-3
+        target_fpr: float = 0.05
+        hidden_size: int = 64
+        dimensionality: int = 10000
+        num_levels: int = 100
+        window_size: int = 10
+        max_sequence_length: int = 100
+        device: str = "cpu"
+        model_config = SettingsConfigDict(extra="ignore", env_file_encoding="utf-8")
+
+    def load_settings(config_path: str) -> Settings:
+        p = Path(config_path)
+        if not p.exists():
+            raise FileNotFoundError(f"Configuration file not found: {config_path}")
+        with open(p, "r", encoding="utf-8") as f:
+            yaml_data = yaml.safe_load(f) or {}
+        return Settings(**yaml_data)
+
+except ImportError:
+    pass

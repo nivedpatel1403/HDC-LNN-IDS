@@ -8,6 +8,8 @@ from .transformer import (
     MiniGPTBaseline,
     compute_model_size,
 )
+from .ft_transformer import FTTransformerSequenceModel
+from .saint import SAINTSequenceModel
 
 __all__ = [
     "LSTMBaseline",
@@ -17,5 +19,7 @@ __all__ = [
     "Mamba3SequenceModel",
     "TransformerEncoderBaseline",
     "MiniGPTBaseline",
+    "FTTransformerSequenceModel",
+    "SAINTSequenceModel",
     "compute_model_size",
 ]
