@@ -1,30 +1,35 @@
-# Python
+# Byte-compiled / optimized / ambient python artifacts
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-.pytest_cache/
 
-# Virtual Environment
+# Python virtual environments
 .venv/
+.venv*/
+env/
 venv/
 ENV/
+build/
+dist/
+*.egg-info/
+
+# Testing, typing & coverage
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+
+# Runtime logging & lockfiles
+*.log
+*.sqlite3
+*.db
+
+# Bulky experimental runs directory (raw outputs, large parquet logs, decision records)
+/runs/
+!runs/README.md
+/data/
+hdlnn/deploy/uploads/
 
 # Phase Reports & Work Notes
 PHASE*_REPORT.md
@@ -32,21 +37,25 @@ PRE_PHASE12_CLEANUP_REPORT.md
 PUBLIC_REPO_READINESS_REPORT.md
 implementation_plan.md
 
+# Benchmark flow datasets (keep primary benchmarks tracked, ignore bulky captures)
+datasets/*.csv
+!datasets/UNSW_NB15_testing-set.csv
+!datasets/kdd_test.csv
+!datasets/ton-iot.csv
 
-# Data & Output directories (gitignored as per spec)
-data/raw/*
-!data/raw/SOURCES.md
-data/encoded/*
-!data/encoded/.gitkeep
-runs/*
-!runs/.gitkeep
-
-# File extensions
-*.npy
-*.parquet
-
-# IDE & OS
+# Local IDE & editor configuration
+.claude/
 .vscode/
 .idea/
-.DS_Store
-Thumbs.db
+*.swp
+*.swo
+
+# LaTeX reports
+/reports/
+
+# Environment variables & secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
