@@ -28,7 +28,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger("run_all_baselines")
 
-BASELINES = ["mamba2", "mamba3", "cnn", "autoencoder", "hdc-lnn", "lstm", "transformer-enc", "mini-gpt"]
+BASELINES = ["mamba2", "cnn", "autoencoder", "hdc-lnn", "lstm", "ft-transformer", "saint"]
 
 def find_dataset_files(datasets_dir: Path, target_file: Optional[str] = None, all_datasets: bool = False) -> List[Path]:
     """Discovers benchmark dataset files in the datasets folder."""
@@ -120,13 +120,10 @@ def generate_dynamic_architectural_analysis(run_ids: List[str], runs_dir: Path =
 
     display_names = {
         "mamba2": "Mamba-2 (Pure-PyTorch SSM)",
-        "mamba3": "Mamba-3 (Complex SSM & Heavy-Tail)",
         "autoencoder": "Autoencoder (LSTM-AE)",
         "cnn": "1D-CNN (Temporal Conv)",
         "hdc-lnn": "HDC-LNN (Ours)",
-        "lstm": "LSTM (Recurrent Baseline)",
-        "transformer-enc": "Transformer-Encoder (Self-Attention)",
-        "mini-gpt": "Mini-GPT (Causal Decoder)",
+        "lstm": "LSTM (Recurrent Baseline)"
     }
 
     # Group runs by dataset
@@ -165,16 +162,6 @@ def generate_dynamic_architectural_analysis(run_ids: List[str], runs_dir: Path =
                 f"AUROC: {m.get('auroc', 0.0):.4f}, Precision: {m.get('precision', 0.0):.4f}, "
                 f"Recall: {m.get('recall', 0.0):.4f} with throughput of {m.get('throughput_flows_sec', 0.0):.2f} flows/sec "
                 f"(latency: {m.get('latency_ms_per_flow', 0.0):.2f} ms/flow) using selective state-space recurrence."
-            )
-
-        # Mamba-3
-        if "mamba3" in baselines_dict:
-            m = baselines_dict["mamba3"]
-            bullets.append(
-                f"- {prefix}**Mamba-3 (Complex SSM & Heavy-Tail)** achieves F1: {m.get('f1_score', 0.0):.4f}, "
-                f"AUROC: {m.get('auroc', 0.0):.4f}, Precision: {m.get('precision', 0.0):.4f}, "
-                f"Recall: {m.get('recall', 0.0):.4f} with throughput of {m.get('throughput_flows_sec', 0.0):.2f} flows/sec "
-                f"(latency: {m.get('latency_ms_per_flow', 0.0):.2f} ms/flow) utilizing complex-valued state rotations and heavy-tail decay."
             )
 
         # 1D-CNN & Autoencoder
@@ -217,24 +204,24 @@ def generate_dynamic_architectural_analysis(run_ids: List[str], runs_dir: Path =
                 f"Recall: {m.get('recall', 0.0):.4f} across recurrent state transitions."
             )
 
-        # Transformer-Encoder
-        if "transformer-enc" in baselines_dict or "transformerenc" in baselines_dict:
-            m = baselines_dict.get("transformer-enc") or baselines_dict.get("transformerenc")
+        # FT-Transformer
+        if "ft-transformer" in baselines_dict or "fttransformer" in baselines_dict:
+            m = baselines_dict.get("ft-transformer", baselines_dict.get("fttransformer"))
             bullets.append(
-                f"- {prefix}**Transformer-Encoder (Self-Attention)** achieves F1: {m.get('f1_score', 0.0):.4f}, "
+                f"- {prefix}**FT-Transformer (Tabular)** achieves F1: {m.get('f1_score', 0.0):.4f}, "
                 f"AUROC: {m.get('auroc', 0.0):.4f}, Precision: {m.get('precision', 0.0):.4f}, "
-                f"Recall: {m.get('recall', 0.0):.4f} with throughput of {m.get('throughput_flows_sec', 0.0):.2f} flows/sec "
-                f"(latency: {m.get('latency_ms_per_flow', 0.0):.2f} ms/flow) using bidirectional multi-head self-attention."
+                f"Recall: {m.get('recall', 0.0):.4f} (latency: {m.get('latency_ms_per_flow', 0.0):.2f} ms/flow) "
+                f"using multi-head self-attention over feature tokens."
             )
 
-        # Mini-GPT
-        if "mini-gpt" in baselines_dict or "minigpt" in baselines_dict:
-            m = baselines_dict.get("mini-gpt") or baselines_dict.get("minigpt")
+        # SAINT
+        if "saint" in baselines_dict:
+            m = baselines_dict["saint"]
             bullets.append(
-                f"- {prefix}**Mini-GPT (Causal Decoder)** achieves F1: {m.get('f1_score', 0.0):.4f}, "
+                f"- {prefix}**SAINT (Row-Col Transformer)** achieves F1: {m.get('f1_score', 0.0):.4f}, "
                 f"AUROC: {m.get('auroc', 0.0):.4f}, Precision: {m.get('precision', 0.0):.4f}, "
-                f"Recall: {m.get('recall', 0.0):.4f} with throughput of {m.get('throughput_flows_sec', 0.0):.2f} flows/sec "
-                f"(latency: {m.get('latency_ms_per_flow', 0.0):.2f} ms/flow) using autoregressive causal masking."
+                f"Recall: {m.get('recall', 0.0):.4f} (latency: {m.get('latency_ms_per_flow', 0.0):.2f} ms/flow) "
+                f"using alternating column and row attention."
             )
 
     return "\n".join(bullets) if bullets else "No architectural analysis generated."
@@ -242,19 +229,19 @@ def generate_dynamic_architectural_analysis(run_ids: List[str], runs_dir: Path =
 def generate_clean_table(run_ids: List[str], runs_dir: Path = Path("runs")) -> str:
     """Generates a clean Markdown comparison table exclusively for the specified run IDs."""
     headers = [
-        "Model Architecture", "Dataset / Run ID", "# Params", "Model Size (MB)", "F1 Score", "Precision", "Recall", 
+        "Model Architecture", "Dataset / Run ID", "Parameters (M)", "F1 Score", "Precision", "Recall", 
         "AUROC", "PR-AUC", "FPR @ 95% TPR", "Latency (ms/flow)", "Throughput (flows/s)", "Peak RSS (MB)"
     ]
     
     display_names = {
         "mamba2": "Mamba-2 (Pure PyTorch SSM)",
-        "mamba3": "Mamba-3 (Complex SSM)",
         "autoencoder": "Autoencoder (LSTM-AE)",
         "cnn": "1D-CNN (Temporal Conv)",
         "hdc-lnn": "HDC-LNN (Ours)",
         "lstm": "LSTM (Recurrent Baseline)",
-        "transformer-enc": "Transformer-Encoder (Self-Attention)",
-        "mini-gpt": "Mini-GPT (Causal Decoder)",
+        "ft-transformer": "FT-Transformer (Tabular)",
+        "fttransformer": "FT-Transformer (Tabular)",
+        "saint": "SAINT (Row-Col Transformer)"
     }
     
     table_rows = []
@@ -274,12 +261,10 @@ def generate_clean_table(run_ids: List[str], runs_dir: Path = Path("runs")) -> s
                 matched_name = display_names.get(b, b)
                 break
                 
-        msize = metrics.get("model_size", {})
-        p_count = msize.get("total_params", 0)
-        p_str = f"{p_count:,}" if p_count > 0 else "-"
-        mb_size = msize.get("size_mb", 0.0)
-        mb_str = f"{mb_size:.2f} MB" if mb_size > 0 else "-"
-
+        param_str = metrics.get("parameters", {}).get("formatted", "-")
+        if param_str == "-" and "parameters" in metrics and "params_m" in metrics["parameters"]:
+            param_str = f"{metrics['parameters']['params_m']:.2f}M"
+            
         f1 = _format_metric(metrics.get("f1_score", 0.0), 4)
         prec = _format_metric(metrics.get("precision", 0.0), 4)
         rec = _format_metric(metrics.get("recall", 0.0), 4)
@@ -291,7 +276,7 @@ def generate_clean_table(run_ids: List[str], runs_dir: Path = Path("runs")) -> s
         mem = _format_metric(metrics.get("peak_rss_mb", 0.0), 2)
         
         table_rows.append([
-            matched_name, rid, p_str, mb_str, f1, prec, rec, auroc, prauc, fpr, lat, thru, mem
+            matched_name, rid, param_str, f1, prec, rec, auroc, prauc, fpr, lat, thru, mem
         ])
         
     if not table_rows:
@@ -318,9 +303,7 @@ def main():
     parser.add_argument("--all", action="store_true", help="Run benchmark across ALL CSV dataset files found in datasets/ directory.")
     parser.add_argument("--quick", action="store_true", help="Run quick smoke test (capped at 5,000 flows, 1 epoch - SMOKE TEST ONLY).")
     parser.add_argument("--limit", type=int, default=None, help="Explicit limit on number of flows to evaluate (default: 30,000 for full-scale).")
-    parser.add_argument("--baselines", type=str, nargs="+", default=None, help="Subset of baselines to evaluate.")
-    parser.add_argument("--cv-folds", type=int, default=1, help="Number of cross-validation folds (e.g. 5 for 5-fold CV).")
-    parser.add_argument("--output-table", type=str, default="final_comparison_table.md", help="Destination markdown table file.")
+    parser.add_argument("--output-table", type=str, default="BENCHMARK_COMPARISON.md", help="Destination markdown table file.")
     parser.add_argument("--runs-dir", type=str, default="runs", help="Output directory for run artifacts.")
     args = parser.parse_args()
 
@@ -340,19 +323,12 @@ def main():
     else:
         limit = 30000  # Default full-scale benchmark
 
-    baselines_to_run = args.baselines if args.baselines else BASELINES
-    # Normalize baseline names
-    baselines_to_run = [b for b in baselines_to_run if b in BASELINES]
-    if not baselines_to_run:
-        logger.error(f"No recognized baselines specified. Available: {BASELINES}")
-        sys.exit(1)
-
     logger.info(f"Discovered {len(dataset_files)} dataset file(s): {[f.name for f in dataset_files]}")
     if args.quick:
         logger.warning("EXECUTION MODE: QUICK SMOKE TEST (5,000 flows, 1 epoch) - FOR PIPELINE INTEGRITY TESTING ONLY, NOT FOR BENCHMARK REPORTING.")
     else:
         logger.info(f"EXECUTION MODE: FULL-SCALE BENCHMARK (limit={limit}, 2 epochs, full validation manifold calibration)")
-    logger.info(f"Active Baselines: {baselines_to_run} (CV Folds: {args.cv_folds})")
+    logger.info(f"Baselines: {BASELINES}")
 
     executed_run_ids = []
     base_config_path = Path("configs/base.yaml")
@@ -362,98 +338,36 @@ def main():
         dataset_config_path = match_config_for_dataset(dataset_file)
         logger.info(f"\n[{d_idx}/{len(dataset_files)}] Processing Dataset: {dataset_file.name} (using {dataset_config_path.name})")
 
-        if args.cv_folds > 1:
-            from hdlnn.data.loaders import load_dataset_flows
-            from hdlnn.eval.injector import inject_threat_scenarios
-            from hdlnn.data.cv_splitter import kfold_entity_splits
-            import numpy as np
+        for baseline in BASELINES:
+            run_id = f"eval_{dataset_stem}_{baseline.replace('-', '')}"
+            logger.info(f"\n--- Running Baseline: {baseline.upper()} (Run ID: {run_id}) ---")
 
-            temp_config = load_config(base_config_path, dataset_config_path)
-            logger.info(f"Loading {dataset_file.name} flows for {args.cv_folds}-Fold Cross-Validation...")
-            flows = load_dataset_flows(temp_config, Path("."), source_file=str(dataset_file), limit=limit)
-            flows = inject_threat_scenarios(
-                flows,
-                seed=temp_config.seed,
-                categorical_cols=temp_config.categorical_columns,
-                numerical_cols=temp_config.numerical_columns
-            )
+            target_run_dir = runs_dir / run_id
+            if target_run_dir.exists() and (target_run_dir / "metrics.json").exists():
+                logger.info(f"Reusing verified existing run artifacts for {run_id}")
+                executed_run_ids.append(run_id)
+                continue
 
-            cv_folds_data = list(kfold_entity_splits(flows, k=args.cv_folds, seed=temp_config.seed))
+            config = load_config(base_config_path, dataset_config_path)
+            
+            # Adjust epochs for quick pass if requested
+            if args.quick and config._data.get("model", {}).get("epochs", 2) > 1:
+                config._data["model"]["epochs"] = 1
 
-            for baseline in baselines_to_run:
-                logger.info(f"\n=== Running {args.cv_folds}-Fold CV for Baseline: {baseline.upper()} ===")
-                fold_metrics_list = []
-                last_run_id = None
-
-                for fold_idx, tr_flows, v_flows, te_flows in cv_folds_data:
-                    run_id = f"eval_{dataset_stem}_{baseline.replace('-', '')}_fold{fold_idx + 1}"
-                    config = load_config(base_config_path, dataset_config_path)
-                    if args.quick and config._data.get("model", {}).get("epochs", 2) > 1:
-                        config._data["model"]["epochs"] = 1
-
-                    start_t = time.time()
-                    try:
-                        m = run_experiment(
-                            config=config,
-                            baseline_name=baseline,
-                            run_id=run_id,
-                            output_dir=runs_dir,
-                            pre_split_flows=(tr_flows, v_flows, te_flows)
-                        )
-                        fold_metrics_list.append(m)
-                        last_run_id = run_id
-                        logger.info(f"  [Fold {fold_idx + 1}/{args.cv_folds}] {baseline} finished in {time.time() - start_t:.2f}s | F1: {m.get('f1_score', 0.0):.4f} | AUROC: {m.get('auroc', 0.0):.4f}")
-                    except Exception as e:
-                        logger.error(f"Error evaluating {baseline} fold {fold_idx + 1} on {dataset_file.name}: {e}", exc_info=True)
-
-                if fold_metrics_list:
-                    # Synthesize mean metrics entry
-                    cv_run_id = f"eval_{dataset_stem}_{baseline.replace('-', '')}_cv"
-                    cv_dir = runs_dir / cv_run_id
-                    cv_dir.mkdir(parents=True, exist_ok=True)
-                    
-                    metric_keys = ["f1_score", "precision", "recall", "auroc", "pr_auc", "fpr_at_95_tpr", "latency_ms_per_flow", "throughput_flows_sec", "peak_rss_mb"]
-                    agg_metrics = {}
-                    for k in metric_keys:
-                        vals = [m.get(k, 0.0) for m in fold_metrics_list if m.get(k) is not None]
-                        agg_metrics[k] = float(np.mean(vals)) if vals else 0.0
-                        agg_metrics[f"{k}_std"] = float(np.std(vals)) if vals else 0.0
-
-                    if "model_size" in fold_metrics_list[0]:
-                        agg_metrics["model_size"] = fold_metrics_list[0]["model_size"]
-                    agg_metrics["cv_folds"] = len(fold_metrics_list)
-                    agg_metrics["experiment"] = fold_metrics_list[0].get("experiment", {})
-
-                    with open(cv_dir / "metrics.json", "w", encoding="utf-8") as f:
-                        json.dump(agg_metrics, f, indent=4)
-
-                    executed_run_ids.append(cv_run_id)
-                    logger.info(f">> Baseline {baseline} {args.cv_folds}-Fold Mean F1: {agg_metrics['f1_score']:.4f} (+/- {agg_metrics['f1_score_std']:.4f}) | AUROC: {agg_metrics['auroc']:.4f}")
-        else:
-            for baseline in baselines_to_run:
-                run_id = f"eval_{dataset_stem}_{baseline.replace('-', '')}"
-                logger.info(f"\n--- Running Baseline: {baseline.upper()} (Run ID: {run_id}) ---")
-
-                config = load_config(base_config_path, dataset_config_path)
-                
-                # Adjust epochs for quick pass if requested
-                if args.quick and config._data.get("model", {}).get("epochs", 2) > 1:
-                    config._data["model"]["epochs"] = 1
-
-                start_t = time.time()
-                try:
-                    metrics = run_experiment(
-                        config=config,
-                        baseline_name=baseline,
-                        run_id=run_id,
-                        output_dir=runs_dir,
-                        limit=limit,
-                        source_file=str(dataset_file)
-                    )
-                    executed_run_ids.append(run_id)
-                    logger.info(f"Baseline {baseline} finished in {time.time() - start_t:.2f}s | F1: {metrics.get('f1_score', 0.0):.4f} | AUROC: {metrics.get('auroc', 0.0):.4f}")
-                except Exception as e:
-                    logger.error(f"Error evaluating {baseline} on {dataset_file.name}: {e}", exc_info=True)
+            start_t = time.time()
+            try:
+                metrics = run_experiment(
+                    config=config,
+                    baseline_name=baseline,
+                    run_id=run_id,
+                    output_dir=runs_dir,
+                    limit=limit,
+                    source_file=str(dataset_file)
+                )
+                executed_run_ids.append(run_id)
+                logger.info(f"Baseline {baseline} finished in {time.time() - start_t:.2f}s | F1: {metrics.get('f1_score', 0.0):.4f} | AUROC: {metrics.get('auroc', 0.0):.4f}")
+            except Exception as e:
+                logger.error(f"Error evaluating {baseline} on {dataset_file.name}: {e}", exc_info=True)
 
     # Generate and save final table
     logger.info("\nGenerating final comparison table...")

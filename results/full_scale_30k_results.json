@@ -1,0 +1,192 @@
+{
+  "hdc-lnn": {
+    "sklearn": {
+      "confusion_matrix": {
+        "tp": 3018,
+        "fp": 349,
+        "fn": 538,
+        "tn": 708
+      },
+      "f1_score": 0.8718763541817132,
+      "precision": 0.8963468963468963,
+      "recall": 0.8487064116985377,
+      "auroc": 0.8609723808175823,
+      "pr_auc": 0.9598226614305199,
+      "fpr_at_95_tpr": 0.8221381267738883,
+      "sample_size": 4613,
+      "latency_ms_per_flow": 0.5618818556254245,
+      "throughput_flows_sec": 1779.7335685220003,
+      "peak_rss_mb": 4673.62890625
+    },
+    "harness": {
+      "confusion_matrix": {
+        "tp": 3018,
+        "fp": 349,
+        "fn": 538,
+        "tn": 708
+      },
+      "precision": 0.8963468963468963,
+      "recall": 0.8487064116985377,
+      "f1_score": 0.8718763541817132,
+      "auroc": 0.8609723808175823,
+      "pr_auc": 0.9598226614305199,
+      "fpr_at_95_tpr": 0.8221381267738883,
+      "latency_ms_per_flow": 0.5618818556254245,
+      "throughput_flows_sec": 1779.7335685220003,
+      "peak_rss_mb": 4673.62890625,
+      "sample_size": 4613
+    }
+  },
+  "mamba2": {
+    "sklearn": {
+      "confusion_matrix": {
+        "tp": 3436,
+        "fp": 26,
+        "fn": 120,
+        "tn": 1031
+      },
+      "f1_score": 0.9791963522371046,
+      "precision": 0.9924898902368573,
+      "recall": 0.9662542182227222,
+      "auroc": 0.9963652249239895,
+      "pr_auc": 0.9988120410932102,
+      "fpr_at_95_tpr": 0.020813623462630087,
+      "sample_size": 4613,
+      "latency_ms_per_flow": 1.185111641014688,
+      "throughput_flows_sec": 843.8023603783049,
+      "peak_rss_mb": 3908.515625
+    },
+    "harness": {
+      "confusion_matrix": {
+        "tp": 3436,
+        "fp": 26,
+        "fn": 120,
+        "tn": 1031
+      },
+      "precision": 0.9924898902368573,
+      "recall": 0.9662542182227222,
+      "f1_score": 0.9791963522371046,
+      "auroc": 0.9963652249239895,
+      "pr_auc": 0.9988120410932102,
+      "fpr_at_95_tpr": 0.020813623462630087,
+      "latency_ms_per_flow": 1.185111641014688,
+      "throughput_flows_sec": 843.8023603783049,
+      "peak_rss_mb": 3908.515625,
+      "sample_size": 4613
+    }
+  },
+  "cnn": {
+    "sklearn": {
+      "confusion_matrix": {
+        "tp": 3127,
+        "fp": 13,
+        "fn": 429,
+        "tn": 1044
+      },
+      "f1_score": 0.9339904420549582,
+      "precision": 0.9958598726114649,
+      "recall": 0.8793588301462317,
+      "auroc": 0.9944331698367411,
+      "pr_auc": 0.9981009439771731,
+      "fpr_at_95_tpr": 0.02270577105014191,
+      "sample_size": 4613,
+      "latency_ms_per_flow": 2.5011802081075576,
+      "throughput_flows_sec": 399.81125580576213,
+      "peak_rss_mb": 5322.3203125
+    },
+    "harness": {
+      "confusion_matrix": {
+        "tp": 3127,
+        "fp": 13,
+        "fn": 429,
+        "tn": 1044
+      },
+      "precision": 0.9958598726114649,
+      "recall": 0.8793588301462317,
+      "f1_score": 0.9339904420549582,
+      "auroc": 0.9944331698367411,
+      "pr_auc": 0.9981009439771731,
+      "fpr_at_95_tpr": 0.02270577105014191,
+      "latency_ms_per_flow": 2.5011802081075576,
+      "throughput_flows_sec": 399.81125580576213,
+      "peak_rss_mb": 5322.3203125,
+      "sample_size": 4613
+    }
+  },
+  "lstm": {
+    "sklearn": {
+      "confusion_matrix": {
+        "tp": 891,
+        "fp": 1,
+        "fn": 2665,
+        "tn": 1056
+      },
+      "f1_score": 0.4006294964028777,
+      "precision": 0.9988789237668162,
+      "recall": 0.25056242969628795,
+      "auroc": 0.7822952771868512,
+      "pr_auc": 0.9302585721375198,
+      "fpr_at_95_tpr": 0.8495742667928098,
+      "sample_size": 4613,
+      "latency_ms_per_flow": 2.7633201820937434,
+      "throughput_flows_sec": 361.88350755731415,
+      "peak_rss_mb": 4752.31640625
+    },
+    "harness": {
+      "confusion_matrix": {
+        "tp": 891,
+        "fp": 1,
+        "fn": 2665,
+        "tn": 1056
+      },
+      "precision": 0.9988789237668162,
+      "recall": 0.25056242969628795,
+      "f1_score": 0.4006294964028777,
+      "auroc": 0.7822952771868512,
+      "pr_auc": 0.9302585721375198,
+      "fpr_at_95_tpr": 0.8495742667928098,
+      "latency_ms_per_flow": 2.7633201820937434,
+      "throughput_flows_sec": 361.88350755731415,
+      "peak_rss_mb": 4752.31640625,
+      "sample_size": 4613
+    }
+  },
+  "autoencoder": {
+    "sklearn": {
+      "confusion_matrix": {
+        "tp": 3416,
+        "fp": 201,
+        "fn": 140,
+        "tn": 856
+      },
+      "f1_score": 0.9524606161996375,
+      "precision": 0.9444290848769699,
+      "recall": 0.9606299212598425,
+      "auroc": 0.9606323157098267,
+      "pr_auc": 0.986736390507884,
+      "fpr_at_95_tpr": 0.17691579943235572,
+      "sample_size": 4613,
+      "latency_ms_per_flow": 4.501698699327886,
+      "throughput_flows_sec": 222.1383674898772,
+      "peak_rss_mb": 2356.265625
+    },
+    "harness": {
+      "confusion_matrix": {
+        "tp": 3416,
+        "fp": 201,
+        "fn": 140,
+        "tn": 856
+      },
+      "precision": 0.9444290848769699,
+      "recall": 0.9606299212598425,
+      "f1_score": 0.9524606161996375,
+      "auroc": 0.9606323157098267,
+      "pr_auc": 0.986736390507884,
+      "fpr_at_95_tpr": 0.17691579943235572,
+      "latency_ms_per_flow": 4.501698699327886,
+      "throughput_flows_sec": 222.1383674898772,
+      "peak_rss_mb": 2356.265625,
+      "sample_size": 4613
+    }
+  }
+}

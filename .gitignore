@@ -26,16 +26,18 @@ htmlcov/
 *.db
 
 # Bulky experimental runs directory (raw outputs, large parquet logs, decision records)
-/runs/
+runs/
 !runs/README.md
-/data/
+scratch_runs/
+scratch_cand_comparison.json
+data/
 hdlnn/deploy/uploads/
 
-# Phase Reports & Work Notes
-PHASE*_REPORT.md
-PRE_PHASE12_CLEANUP_REPORT.md
-PUBLIC_REPO_READINESS_REPORT.md
-implementation_plan.md
+# Local agent guides & skills
+Humanize.md
+
+# Internship report & manuscripts (excluded from git push)
+report/
 
 # Benchmark flow datasets (keep primary benchmarks tracked, ignore bulky captures)
 datasets/*.csv
@@ -49,9 +51,6 @@ datasets/*.csv
 .idea/
 *.swp
 *.swo
-
-# LaTeX reports
-/reports/
 
 # Environment variables & secrets
 .env

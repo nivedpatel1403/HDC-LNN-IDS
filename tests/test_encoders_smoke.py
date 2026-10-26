@@ -72,28 +72,6 @@ def test_encoders():
     out, h_last = mamba_model.forward(x_dummy)
     assert h_last.shape == (2, 2 * 64 * 16)
     print("  -> MambaSequenceModel forward pass: PASSED")
-
-    # 4. Test Mamba-3 SSM Model (Complex SSM & Heavy-Tail)
-    print("\n4. Testing Mamba3SequenceModel (Complex SSM & Heavy-Tail)...")
-    from hdlnn.baselines.mamba3 import Mamba3SequenceModel
-    mamba3_model = Mamba3SequenceModel(input_dim=1024, hidden_dim=64, proj_dim=1024)
-    assert isinstance(mamba3_model, ISequenceModel)
-    out3, h3_last = mamba3_model.forward(x_dummy)
-    assert h3_last.shape == (2, 2 * 2 * 64 * 16)
-    assert out3.shape == (2, 8, 64)
-    # Test step
-    h_init = torch.zeros(1, 2 * 64 * 16 * 2)
-    x_step = torch.randn(1, 1024)
-    dt_step = torch.tensor([[1.0]])
-    h_step = mamba3_model.step(x_step, h_init, dt_step)
-    assert h_step.shape == (1, 64 + 2 * 64 * 16 * 2)
-    # Test next step using previous state
-    h_step2 = mamba3_model.step(x_step, h_step, dt_step)
-    assert h_step2.shape == (1, 64 + 2 * 64 * 16 * 2)
-    # Test predict_next_vector
-    pred = mamba3_model.predict_next_vector(h_step2[:, :64])
-    assert pred.shape == (1, 1024)
-    print("  -> Mamba3SequenceModel forward, step, and predict_next_vector: PASSED")
     
     print("\n=== ALL ENCODER AND MODEL TESTS COMPLETED ===")
 

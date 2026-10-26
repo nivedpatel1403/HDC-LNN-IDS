@@ -85,31 +85,3 @@ def test_saint_forward_and_step():
     # Next vector prediction
     pred = model.predict_next_vector(h_next)
     assert pred.shape == (2, 10000)
-
-
-def test_transformer_encoder_and_minigpt_baselines():
-    from hdlnn.baselines.transformer import TransformerEncoderBaseline, MiniGPTBaseline
-
-    # 1. Transformer-Encoder
-    enc_model = TransformerEncoderBaseline(input_dim=1024, hidden_dim=64, context_len=8, proj_dim=1024)
-    x = torch.randn(2, 8, 1024)
-    seq_out, h_last = enc_model.forward(x)
-    assert seq_out.shape == (2, 8, 64)
-    assert h_last.shape == (2, 64)
-
-    h_step = enc_model.step(x[:, 0, :], h_last, torch.ones(2, 1))
-    assert h_step.shape == (2, 8 * 64)
-    pred = enc_model.predict_next_vector(h_step[:, -64:])
-    assert pred.shape == (2, 1024)
-
-    # 2. Mini-GPT Causal Decoder
-    gpt_model = MiniGPTBaseline(input_dim=1024, hidden_dim=64, context_len=8, proj_dim=1024)
-    seq_out2, h_last2 = gpt_model.forward(x)
-    assert seq_out2.shape == (2, 8, 64)
-    assert h_last2.shape == (2, 64)
-
-    h_step2 = gpt_model.step(x[:, 0, :], h_last2, torch.ones(2, 1))
-    assert h_step2.shape == (2, 8 * 64)
-    pred2 = gpt_model.predict_next_vector(h_step2[:, -64:])
-    assert pred2.shape == (2, 1024)
-

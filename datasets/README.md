@@ -1,14 +1,14 @@
-# Datasets
+# Datasets Directory
 
-This folder holds the raw CSV datasets used for training/evaluation. Files are NOT committed to git — they're too large and shouldn't be redistributed.
+This folder holds the cybersecurity benchmark flow datasets used for training, evaluation, and empirical comparison across all models.
 
-## Setup
-Download the datasets below and place the CSV files directly in this folder.
+## Pre-Packaged Benchmark Datasets
 
-- UNSW-NB15: [add source link]
-- NSL-KDD: [add source link]
-- CICIoT2023 / IoT Botnet: [add source link]
+Primary benchmark datasets are included directly in this repository for out-of-the-box evaluation and reproduction:
+- UNSW-NB15: `UNSW_NB15_testing-set.csv` (primary 30,000-flow evaluation benchmark)
+- KDD and NSL-KDD: `kdd_test.csv` (primary KDD test benchmark)
+- ToN-IoT: `ton-iot.csv` (IoT network telemetry benchmark)
 
-## Notes
-- Expected filenames must match what's referenced in configs/dataset_*.yaml — check that folder for exact names.
-- This folder is gitignored except for this README, so your local downloads stay local and never get pushed.
+## Extended Datasets and Acquisition
+
+For citations, source repositories, and download instructions for full multi-gigabyte raw captures (IoT-23, UNSW Botnet, and multi-part raw flow dumps), see [`SOURCES.md`](SOURCES.md).
